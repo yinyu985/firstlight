@@ -37,6 +37,9 @@ button { color: inherit; }
 .search-box { width: 50%; height: 40px; display: flex; align-items: center; gap: 10px; color: rgba(176,210,201,.58); border-bottom: 1px solid rgba(154,207,194,.22); }
 .search-prefix { width: 26px; display: grid; place-items: center; color: var(--foreground-color, #e8f0ed); line-height: 1; }
 .search-box input { flex: 1; min-width: 0; padding: 0; border: 0; outline: 0; color: var(--foreground-color, #e8f0ed); background: transparent; font-size: 11px; letter-spacing: .08em; }
+.search-box.search-text-left input { text-align: left; }
+.search-box.search-text-center input { text-align: center; }
+.search-box.search-text-right input { text-align: right; }
 .search-box input::placeholder { color: color-mix(in srgb, var(--foreground-color, #e8f0ed) 34%, transparent); }
 .search-box button { padding: 2px 5px; border: 0; color: #8caaa2; background: transparent; font-size: 17px; cursor: pointer; }
 

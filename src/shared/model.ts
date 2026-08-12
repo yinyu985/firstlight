@@ -32,6 +32,7 @@ export interface HomeLayout {
 }
 
 export type ClockPosition = "hidden" | "left" | "center" | "right";
+export type SearchTextPosition = ClockPosition;
 
 export type HoverStyle = "underline" | "box" | "block";
 export type ThemeMode = "dark" | "light";
@@ -39,7 +40,7 @@ export type ThemeMode = "dark" | "light";
 export interface Features {
   searchPosition: ClockPosition;
   searchIcon: boolean;
-  searchText: boolean;
+  searchText: SearchTextPosition;
   bookmarkDetails: boolean;
   clockSeconds: boolean;
   hoverStyle: HoverStyle;
@@ -134,7 +135,7 @@ export const DEFAULT_SETTINGS: SyncedSettings = {
   features: {
     searchPosition: "left",
     searchIcon: true,
-    searchText: true,
+    searchText: "left",
     bookmarkDetails: true,
     clockSeconds: false,
     hoverStyle: "underline",

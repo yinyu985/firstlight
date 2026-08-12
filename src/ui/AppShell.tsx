@@ -230,6 +230,17 @@ function ClockPicker({ value, onChange }: { value: ClockPosition; onChange: (val
   </div>;
 }
 
+function SearchTextPicker({ value, onChange }: { value: ClockPosition; onChange: (value: ClockPosition) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismissablePicker(open, setOpen);
+  const options: ClockPosition[] = ["hidden", "left", "center", "right"];
+  const label = value === "hidden" ? "HIDE" : value.toUpperCase();
+  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
+    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{label}</span><b className="picker-arrow" /></button>
+    {open && <div className="picker-menu clock-menu">{options.map((option) => <button key={option} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option === "hidden" ? "HIDE" : option.toUpperCase()}</button>)}</div>}
+  </div>;
+}
+
 function AlignmentPicker({ value, onChange }: { value: BookmarkAlignment; onChange: (value: BookmarkAlignment) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
@@ -472,9 +483,16 @@ export function AppShell(props: Props) {
       <section className="center-stage" onClick={(event) => event.stopPropagation()}>
         {state.settings.clockPosition !== "hidden" && <header className={`topline clock-${state.settings.clockPosition}`} style={contentFrameStyle}><time>{clock}</time></header>}
 
-        {searchPosition !== "hidden" && <div className={`search-shell search-${searchPosition}`} style={contentFrameStyle}><label className="search-box">
+        {searchPosition !== "hidden" && <div className={`search-shell search-${searchPosition}`} style={contentFrameStyle}><label className={`search-box search-text-${state.settings.features.searchText}`}>
           {state.settings.features.searchIcon && <span className="search-prefix"><Search size={20} strokeWidth={1.8} /></span>}
-          <input value={query} onFocus={() => { if (query) setSearchResultsOpen(true); }} onChange={(event) => { setQuery(event.target.value); setSearchResultsOpen(Boolean(event.target.value)); setOpenFolder(null); }} placeholder={state.settings.features.searchText ? "SEARCH BOOKMARKS" : ""} aria-label="Search bookmarks" autoComplete="off" />
+          <input
+            value={query}
+            onFocus={() => { if (query) setSearchResultsOpen(true); }}
+            onChange={(event) => { setQuery(event.target.value); setSearchResultsOpen(Boolean(event.target.value)); setOpenFolder(null); }}
+            placeholder={state.settings.features.searchText === "hidden" ? "" : "SEARCH BOOKMARKS"}
+            aria-label="Search bookmarks"
+            autoComplete="off"
+          />
           {query && <button onClick={() => { setQuery(""); setSearchResultsOpen(false); }} aria-label="Clear search">×</button>}
         </label></div>}
 
@@ -545,7 +563,7 @@ export function AppShell(props: Props) {
             <div className="setting-line"><label>Highlight color</label><input className="color-input" type="color" value={state.settings.features.hoverColor} onChange={(event) => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverColor: event.target.value } })} /></div>
             <div className="setting-line"><label>Search</label><ClockPicker value={state.settings.features.searchPosition} onChange={(searchPosition) => { if (searchPosition === "hidden") { setQuery(""); setSearchResultsOpen(false); } updateSettings({ ...state.settings, features: { ...state.settings.features, searchPosition } }); }} /></div>
             <div className="setting-line"><label>Search icon</label><VisibilityToggle visible={state.settings.features.searchIcon} onChange={(searchIcon) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchIcon } })} /></div>
-            <div className="setting-line"><label>Search text</label><VisibilityToggle visible={state.settings.features.searchText} onChange={(searchText) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchText } })} /></div>
+            <div className="setting-line"><label>Search text</label><SearchTextPicker value={state.settings.features.searchText} onChange={(searchText) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchText } })} /></div>
           </section>
 
           <section className="settings-section">

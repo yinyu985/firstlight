@@ -1,6 +1,7 @@
 import { GistClient, GitHubError, normalizeGitHubToken, type RemoteSnapshot } from "../shared/gist";
 import {
   DEFAULT_SETTINGS,
+  type ClockPosition,
   type BookmarkItem,
   type SyncNote,
   type RecoveryPoint,
@@ -27,6 +28,9 @@ let operation = Promise.resolve();
 let startupRemoteCheckPending = false;
 let startupRemoteCheckRequested = false;
 let openSetupOnLaunch = false;
+const SEARCH_TEXT_OPTIONS: readonly ClockPosition[] = ["hidden", "left", "center", "right"];
+
+const isSearchTextPosition = (value: unknown): value is ClockPosition => value === "hidden" || value === "left" || value === "center" || value === "right";
 
 function queue<T>(task: () => Promise<T>): Promise<T> {
   const next = operation.then(task, task);
@@ -505,8 +509,16 @@ async function initialize(): Promise<void> {
     };
     await saveMemory();
   }
+  const storedSearchText: unknown = memory.settings.features.searchText;
+  const normalizedSearchText = storedSearchText === true
+    ? SEARCH_TEXT_OPTIONS[1]
+    : storedSearchText === false
+      ? SEARCH_TEXT_OPTIONS[0]
+      : isSearchTextPosition(storedSearchText)
+        ? storedSearchText
+        : undefined;
   if (typeof memory.settings.features.searchIcon !== "boolean" ||
-    typeof memory.settings.features.searchText !== "boolean" ||
+    !isSearchTextPosition(normalizedSearchText) ||
     typeof memory.settings.features.bookmarkDetails !== "boolean" ||
     typeof memory.settings.features.clockSeconds !== "boolean") {
     memory.settings = {
@@ -514,7 +526,7 @@ async function initialize(): Promise<void> {
       features: {
         ...memory.settings.features,
         searchIcon: true,
-        searchText: true,
+        searchText: normalizedSearchText ?? SEARCH_TEXT_OPTIONS[1],
         bookmarkDetails: true,
         clockSeconds: false
       }

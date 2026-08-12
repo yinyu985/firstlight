@@ -1,6 +1,7 @@
 import {
   MAX_SNAPSHOT_BYTES,
   SNAPSHOT_SCHEMA_VERSION,
+  type ClockPosition,
   canonicalSnapshot,
   type SyncNote,
   type BookmarkItem,
@@ -132,13 +133,22 @@ export function validateSnapshot(input: unknown): Snapshot {
   const searchPosition = features?.searchPosition;
   const searchIcon = features?.searchIcon;
   const searchText = features?.searchText;
+  const normalizedSearchText = searchText === true
+    ? "left"
+    : searchText === false
+      ? "hidden"
+      : searchText;
+  const isSearchTextPosition = (value: unknown): value is ClockPosition => (
+    value === "hidden" || value === "left" || value === "center" || value === "right"
+  );
   const bookmarkDetails = features?.bookmarkDetails;
   const clockSeconds = features?.clockSeconds;
   const hoverStyle = features?.hoverStyle === undefined ? "underline" : features.hoverStyle;
   const hoverColor = features?.hoverColor === undefined ? "#59d5b8" : features.hoverColor;
   const themeMode = features?.themeMode === undefined ? "dark" : features.themeMode;
   if ((searchPosition !== "hidden" && searchPosition !== "left" && searchPosition !== "center" && searchPosition !== "right") ||
-    typeof searchIcon !== "boolean" || typeof searchText !== "boolean" ||
+    typeof searchIcon !== "boolean" ||
+    !isSearchTextPosition(normalizedSearchText) ||
     typeof bookmarkDetails !== "boolean" || typeof clockSeconds !== "boolean" ||
     (hoverStyle !== "underline" && hoverStyle !== "box" && hoverStyle !== "block") ||
     typeof hoverColor !== "string" || !HEX_COLOR.test(hoverColor) ||
@@ -238,7 +248,7 @@ export function validateSnapshot(input: unknown): Snapshot {
       features: {
         searchPosition,
         searchIcon,
-        searchText,
+        searchText: normalizedSearchText,
         bookmarkDetails,
         clockSeconds,
         hoverStyle,

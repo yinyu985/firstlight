@@ -99,6 +99,17 @@ describe("parseSnapshot", () => {
     expect(parseSnapshot(JSON.stringify(legacy)).config.features.hoverColor).toBe("#59d5b8");
   });
 
+  it("accepts legacy boolean searchText values", () => {
+    const snapshot = parseSnapshot(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    const hiddenLegacy = JSON.parse(JSON.stringify(snapshot));
+    hiddenLegacy.config.features.searchText = false;
+    expect(parseSnapshot(JSON.stringify(hiddenLegacy)).config.features.searchText).toBe("hidden");
+
+    const leftLegacy = JSON.parse(JSON.stringify(snapshot));
+    leftLegacy.config.features.searchText = true;
+    expect(parseSnapshot(JSON.stringify(leftLegacy)).config.features.searchText).toBe("left");
+  });
+
   it("rejects unknown hover styles", () => {
     const snapshot = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
