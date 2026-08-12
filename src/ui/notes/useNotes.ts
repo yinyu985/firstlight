@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SyncNote } from "../../shared/model";
 import type { Note, NoteSortMode } from "./types";
-import { clearNotesState, loadNotesState, saveNotesState, type StoredNotesState } from "./storage";
+import { clearNotesState, loadNotesState, saveNotesSortMode, saveNotesState, type StoredNotesState } from "./storage";
 
 const DEFAULT_SORT_MODE: NoteSortMode = "updated-desc";
 const AUTO_SAVE_MS = 350;
@@ -101,7 +101,7 @@ export interface NotesHook {
 export function useNotes(options: UseNotesOptions = {}): NotesHook {
   const { initialNotes, onSave, externalResetKey = 0 } = options;
   const [notes, setNotes] = useState<Note[]>([]);
-  const [sortMode, setSortModeState] = useState<NoteSortMode>(DEFAULT_SORT_MODE);
+  const [sortMode, setSortModeState] = useState<NoteSortMode>(() => normalizeSortMode(loadNotesState().sortMode));
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isReady, setIsReady] = useState(false);
@@ -323,6 +323,7 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
 
   const setSortMode = useCallback((nextMode: NoteSortMode) => {
     setSortModeState(nextMode);
+    saveNotesSortMode(nextMode);
   }, []);
 
   const deleteNote = useCallback((noteId: string) => {

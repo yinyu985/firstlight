@@ -203,6 +203,17 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
   const windowRef = useRef<HTMLDivElement>(null);
   const [activeDeleteNoteId, setActiveDeleteNoteId] = useState<string | null>(null);
 
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      if (windowRef.current && !windowRef.current.contains(document.activeElement)) windowRef.current.focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      previousFocus?.focus();
+    };
+  }, []);
+
   const startDeleteNote = (noteId: string) => {
     setActiveDeleteNoteId(noteId);
   };
@@ -236,7 +247,23 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
         target.tagName === "TEXTAREA" ||
         target.isContentEditable;
       const inNotesPanel = windowRef.current?.contains(event.target as Node) ?? false;
-      if (!inNotesPanel || isEditable || event.defaultPrevented) return;
+      if (!inNotesPanel || event.defaultPrevented) return;
+
+      if (event.key === "Tab" && windowRef.current) {
+        const focusable = Array.from(windowRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (first && last && event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (first && last && !event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+
+      if (isEditable) return;
 
       if (!readonly && (event.key === "Delete" || event.key === "Backspace")) {
         if (!selectedNoteId) return;
@@ -260,6 +287,10 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
         id="notes-app"
         className="notes-window"
         ref={windowRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Notes"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => {
           if (!activeDeleteNoteId) return;

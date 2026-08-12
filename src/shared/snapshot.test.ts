@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, eastEightTimestamp, snapshotFrom, type SyncedSettings, type Snapshot } from "./model";
-import { DYNAMIC_EFFECT_DEFINITIONS, type DynamicEffectParameterDefinition, type DynamicSpeedSpec, type DynamicEffectDefinition } from "./dynamicEffects";
-import { parseSnapshot, prettySnapshot, snapshotHash, stableStringify, validateSnapshot } from "./snapshot";
+import { DEFAULT_SETTINGS, MAX_SNAPSHOT_BYTES, eastEightTimestamp, snapshotFrom, type SyncedSettings, type Snapshot } from "./model";
+import { DYNAMIC_EFFECT_DEFINITIONS, isDynamicEffect, isDynamicEffectInput, normalizeDynamicEffect, type DynamicEffectParameterDefinition, type DynamicSpeedSpec, type DynamicEffectDefinition } from "./dynamicEffects";
+import { parseSnapshot, prettySnapshot, serializeSnapshot, snapshotBytes, snapshotHash, stableStringify, validateSnapshot } from "./snapshot";
 
 type RangeParameter = Extract<DynamicEffectParameterDefinition, { kind: "range" }>;
 
@@ -534,10 +534,58 @@ describe("parseSnapshot", () => {
     expect(() => validateSnapshot(invalid)).toThrow("Duplicate note id");
   });
 
+  it("keeps missing notes as a legacy default but rejects a present malformed value", () => {
+    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    delete legacy.notes;
+    expect(parseSnapshot(JSON.stringify(legacy)).notes).toEqual([]);
+
+    for (const notes of [{}, "invalid", 1, null]) {
+      expect(() => parseSnapshot(JSON.stringify({ ...legacy, notes }))).toThrow("Invalid notes list");
+    }
+  });
+
+  it("rejects non-finite background angles passed directly to the validator", () => {
+    const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
+    const invalid = {
+      ...snapshot,
+      config: {
+        ...snapshot.config,
+        background: { type: "gradient" as const, from: "#102030", to: "#304050", angle: Number.NaN }
+      }
+    };
+    expect(() => validateSnapshot(invalid)).toThrow("Invalid gradient settings");
+  });
+
   it("keeps an empty-string URL as a bookmark in the diff projection", async () => {
     const projected = await prettySnapshot(snapshotFrom([{ title: "Empty URL", url: "" }], DEFAULT_SETTINGS));
     expect(projected).toContain('"url": ""');
     expect(projected).not.toContain('"children"');
+  });
+
+  it("keeps the beginning of a long URL without a protocol in the diff projection", async () => {
+    const url = `first-eight-${"x".repeat(4_200)}`;
+    const projected = JSON.parse(await prettySnapshot(snapshotFrom([{ title: "Long", url }], DEFAULT_SETTINGS))) as Snapshot;
+    expect(projected.bookmarks[0]?.url).toContain(`unknown:${url.slice(0, 256)}`);
+  });
+});
+
+describe("snapshot upload size", () => {
+  it("uses the uploaded pretty JSON bytes at the exact 10 MiB boundary", () => {
+    const timestamp = "2026-08-12T10:00:00.000+08:00";
+    const makeSnapshot = (content: string): Snapshot => snapshotFrom([], DEFAULT_SETTINGS, [{
+      id: "size-boundary",
+      name: "Boundary",
+      content,
+      createtime: timestamp,
+      updatetime: timestamp
+    }], timestamp);
+    const fixedBytes = snapshotBytes(makeSnapshot(""));
+    const content = "x".repeat(MAX_SNAPSHOT_BYTES - fixedBytes);
+    const exact = makeSnapshot(content);
+
+    expect(new TextEncoder().encode(serializeSnapshot(exact)).byteLength).toBe(MAX_SNAPSHOT_BYTES);
+    expect(() => validateSnapshot(exact)).not.toThrow();
+    expect(() => validateSnapshot(makeSnapshot(`${content}x`))).toThrow("10 MiB");
   });
 });
 
@@ -548,6 +596,21 @@ describe("eastEightTimestamp", () => {
 });
 
 describe("dynamic effect range schema", () => {
+  it("does not accept object prototype property names as dynamic effects", () => {
+    for (const value of ["constructor", "__proto__", "toString"]) {
+      expect(isDynamicEffect(value)).toBe(false);
+      expect(isDynamicEffectInput(value)).toBe(false);
+      expect(normalizeDynamicEffect(value)).toBe("flow");
+    }
+
+    const invalid = JSON.parse(JSON.stringify(snapshotFrom([], {
+      ...DEFAULT_SETTINGS,
+      background: { type: "dynamic", effect: "flow", from: "#102030", to: "#304050", angle: 145, speed: 10 }
+    })));
+    invalid.config.background.effect = "constructor";
+    expect(() => parseSnapshot(JSON.stringify(invalid))).toThrow("Invalid dynamic background effect");
+  });
+
   it("keeps numeric speed and parameter specs valid", () => {
     for (const definition of DYNAMIC_EFFECT_DEFINITIONS) {
       ensureInRange(definition.speed);

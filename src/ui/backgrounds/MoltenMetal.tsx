@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
+import { bindWindowPointer } from "./pointerTracking";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -102,6 +104,7 @@ uniform float uOpacity;
 uniform vec2 uMouse;
 uniform float uMouseStrength;
 uniform float uEnableMouse;
+uniform float uMouseActive;
 uniform vec3 uColor1;
 uniform vec3 uColor2;
 uniform vec3 uColor3;
@@ -112,13 +115,18 @@ float hash(vec2 p) {
 
 void main() {
   float time = iTime * uSpeed;
-  vec2 p = uScale * ((gl_FragCoord.xy - 0.5 * iResolution.xy) / iResolution.y) - 0.5;
-
-  vec2 drift = vec2(0.0);
+  vec2 scene = (gl_FragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
   if (uEnableMouse > 0.5) {
-    drift = (uMouse - vec2(0.5)) * uMouseStrength * 2.0;
+    vec2 mousePoint = (uMouse * iResolution.xy - 0.5 * iResolution.xy) / iResolution.y;
+    vec2 delta = scene - mousePoint;
+    float distanceToMouse = length(delta);
+    float influence = exp(-dot(delta, delta) * 7.0) * uMouseStrength * uMouseActive;
+    float turn = influence * 1.1;
+    mat2 mouseRotation = mat2(cos(turn), -sin(turn), sin(turn), cos(turn));
+    scene = mousePoint + mouseRotation * delta;
+    scene += normalize(delta + vec2(0.0001)) * sin(distanceToMouse * 16.0 - time * 1.6) * influence * 0.025;
   }
-  p += drift;
+  vec2 p = uScale * scene - 0.5;
 
   vec2 i = p;
   float c = 0.0;
@@ -409,6 +417,7 @@ export function MoltenMetal({
     const uMouse = gl.getUniformLocation(program, "uMouse");
     const uMouseStrength = gl.getUniformLocation(program, "uMouseStrength");
     const uEnableMouse = gl.getUniformLocation(program, "uEnableMouse");
+    const uMouseActive = gl.getUniformLocation(program, "uMouseActive");
     const uColor1 = gl.getUniformLocation(program, "uColor1");
     const uColor2 = gl.getUniformLocation(program, "uColor2");
     const uColor3 = gl.getUniformLocation(program, "uColor3");
@@ -432,6 +441,7 @@ export function MoltenMetal({
       uMouse === null ||
       uMouseStrength === null ||
       uEnableMouse === null ||
+      uMouseActive === null ||
       uColor1 === null ||
       uColor2 === null ||
       uColor3 === null
@@ -443,12 +453,12 @@ export function MoltenMetal({
 
     const currentMouse: [number, number] = [0.5, 0.5];
     const targetMouse: [number, number] = [0.5, 0.5];
+    let currentMouseActive = 0;
+    let targetMouseActive = 0;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.floor(rect.width * dpr));
-      const height = Math.max(1, Math.floor(rect.height * dpr));
+      const { width, height } = boundedCanvasSize(rect.width, rect.height);
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -477,40 +487,26 @@ export function MoltenMetal({
       gl.uniform2f(uMouse, currentMouse[0], currentMouse[1]);
       gl.uniform1f(uMouseStrength, settings.mouseStrength);
       gl.uniform1f(uEnableMouse, settings.mouseInteraction ? 1 : 0);
+      gl.uniform1f(uMouseActive, currentMouseActive);
       gl.uniform3f(uColor1, clampColor(c1, 0), clampColor(c1, 1), clampColor(c1, 2));
       gl.uniform3f(uColor2, clampColor(c2, 0), clampColor(c2, 1), clampColor(c2, 2));
       gl.uniform3f(uColor3, clampColor(c3, 0), clampColor(c3, 1), clampColor(c3, 2));
     };
 
-    const onPointerMove = (event: PointerEvent) => {
+    const unbindPointer = bindWindowPointer(canvas, (pointer) => {
       if (!settings.mouseInteraction) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = (event.clientX - rect.left) / rect.width;
-      const y = 1 - (event.clientY - rect.top) / rect.height;
-      targetMouse[0] = clamp(x, 0, 1);
-      targetMouse[1] = clamp(y, 0, 1);
-    };
-
-    const onTouchMove = (event: TouchEvent) => {
-      if (!settings.mouseInteraction || !event.touches.length) return;
-      const point = event.touches[0];
-      const rect = canvas.getBoundingClientRect();
-      targetMouse[0] = clamp(((point?.clientX ?? 0) - rect.left) / rect.width, 0, 1);
-      targetMouse[1] = clamp(1 - (((point?.clientY ?? 0) - rect.top) / rect.height), 0, 1);
-    };
-
-    if (settings.mouseInteraction) {
-      canvas.addEventListener("pointermove", onPointerMove);
-      canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-      canvas.style.pointerEvents = "auto";
-    } else {
-      canvas.style.pointerEvents = "none";
-    }
+      targetMouse[0] = pointer.x;
+      targetMouse[1] = pointer.y;
+    }, (isActive) => {
+      targetMouseActive = settings.mouseInteraction && isActive ? 1 : 0;
+    });
+    canvas.style.pointerEvents = "none";
 
     const render = (time: number) => {
       if (disposed) return;
       currentMouse[0] += (targetMouse[0] - currentMouse[0]) * 0.12;
       currentMouse[1] += (targetMouse[1] - currentMouse[1]) * 0.12;
+      currentMouseActive += (targetMouseActive - currentMouseActive) * 0.1;
       setUniforms();
       gl.uniform1f(uTime, time * 0.001);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -547,15 +543,20 @@ export function MoltenMetal({
       stopLoop();
       window.removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", handleVisibility);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("touchmove", onTouchMove);
+      unbindPointer();
       gl.deleteBuffer(positionBuffer);
       gl.deleteProgram(program);
     };
   }, [
-    settings.color1,
-    settings.color2,
-    settings.color3,
+    settings.color1[0],
+    settings.color1[1],
+    settings.color1[2],
+    settings.color2[0],
+    settings.color2[1],
+    settings.color2[2],
+    settings.color3[0],
+    settings.color3[1],
+    settings.color3[2],
     settings.speed,
     settings.scale,
     settings.detail,

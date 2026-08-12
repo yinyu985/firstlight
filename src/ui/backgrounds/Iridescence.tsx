@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
+import { bindWindowPointer } from "./pointerTracking";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -19,6 +21,9 @@ interface IridescenceSettings {
   color: Color;
   speed: number;
   amplitude: number;
+  brightness: number;
+  contrast: number;
+  lighting: number;
   mouseInteraction: boolean;
   mouseStrength: number;
 }
@@ -28,6 +33,9 @@ export const IRIDESCENCE_DEFAULTS = {
   to: [1, 1, 1],
   speed: 1,
   amplitude: 0.1,
+  brightness: 1,
+  contrast: 1,
+  lighting: 0,
   mouseInteraction: true,
   mouseStrength: 1
 } as const;
@@ -35,6 +43,9 @@ export const IRIDESCENCE_DEFAULTS = {
 export const IRIDESCENCE_RANGES = {
   speed: { min: 0.05, max: 6, step: 0.01 },
   amplitude: { min: 0.02, max: 1.2, step: 0.01 },
+  brightness: { min: 0, max: 2, step: 0.01 },
+  contrast: { min: 0, max: 3, step: 0.01 },
+  lighting: { min: 0, max: 1, step: 0.01 },
   mouseStrength: { min: 0, max: 3, step: 0.05 }
 } as const;
 
@@ -60,6 +71,10 @@ uniform vec2 uMouse;
 uniform float uAmplitude;
 uniform float uSpeed;
 uniform float uMouseStrength;
+uniform float uMouseActive;
+uniform float uBrightness;
+uniform float uContrast;
+uniform float uLighting;
 
 varying vec2 vUv;
 
@@ -67,7 +82,13 @@ void main() {
   float mr = min(uResolution.x, uResolution.y);
   vec2 uv = (vUv.xy * 2.0 - 1.0) * uResolution.xy / mr;
 
-  uv += (uMouse - vec2(0.5)) * uAmplitude * uMouseStrength;
+  vec2 mousePoint = (uMouse * 2.0 - 1.0) * uResolution.xy / mr;
+  vec2 mouseDelta = uv - mousePoint;
+  float mouseDistance = length(mouseDelta);
+  float mouseInfluence = exp(-dot(mouseDelta, mouseDelta) * 3.5) * uMouseStrength * uMouseActive;
+  vec2 tangent = normalize(vec2(-mouseDelta.y, mouseDelta.x) + vec2(0.0001));
+  float localWave = 0.55 + 0.45 * sin(mouseDistance * 13.0 - uTime * uSpeed);
+  uv += tangent * localWave * mouseInfluence * uAmplitude * 0.16;
 
   float d = -uTime * 0.5 * uSpeed;
   float a = 0.0;
@@ -78,7 +99,9 @@ void main() {
   d += uTime * 0.5 * uSpeed;
   vec3 col = vec3(cos(uv * vec2(d, a)) * 0.6 + 0.4, cos(a + d) * 0.5 + 0.5);
   col = cos(col * cos(vec3(d, a, 2.5)) * 0.5 + 0.5) * uColor;
-  gl_FragColor = vec4(col, 1.0);
+  col = (col - 0.5) * uContrast + 0.5;
+  col = col * uBrightness + vec3(uLighting * (0.08 + mouseInfluence * 0.12));
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -196,9 +219,12 @@ function resolveSettings(props: IridescenceProps): IridescenceSettings {
   );
 
   return {
-    color: blendWithColor3(from, to, color3, clamp(((getNumber(params.contrast, 1) - 1) * 0.15 + getNumber(params.lighting, 0)), 0, 0.45)),
+    color: blendWithColor3(from, to, color3, clamp((0.2 + (getNumber(params.contrast, 1) - 1) * 0.1 + getNumber(params.lighting, 0) * 0.2), 0, 0.55)),
     speed: clamp(speed, IRIDESCENCE_RANGES.speed.min, IRIDESCENCE_RANGES.speed.max),
     amplitude: clamp(amplitudeSource, IRIDESCENCE_RANGES.amplitude.min, IRIDESCENCE_RANGES.amplitude.max),
+    brightness: clamp(getNumber(params.brightness, IRIDESCENCE_DEFAULTS.brightness), IRIDESCENCE_RANGES.brightness.min, IRIDESCENCE_RANGES.brightness.max),
+    contrast: clamp(getNumber(params.contrast, IRIDESCENCE_DEFAULTS.contrast), IRIDESCENCE_RANGES.contrast.min, IRIDESCENCE_RANGES.contrast.max),
+    lighting: clamp(getNumber(params.lighting, IRIDESCENCE_DEFAULTS.lighting), IRIDESCENCE_RANGES.lighting.min, IRIDESCENCE_RANGES.lighting.max),
     mouseInteraction: getBoolean(props.mouseInteraction, getBoolean(params.mouseInteraction, IRIDESCENCE_DEFAULTS.mouseInteraction)),
     mouseStrength: clamp(getNumber(props.mouseStrength, getNumber((params as Record<string, number>).mouseStrength, IRIDESCENCE_DEFAULTS.mouseStrength)), IRIDESCENCE_RANGES.mouseStrength.min, IRIDESCENCE_RANGES.mouseStrength.max)
   };
@@ -283,19 +309,24 @@ export function Iridescence({
     const uAmplitude = gl.getUniformLocation(program, "uAmplitude");
     const uSpeed = gl.getUniformLocation(program, "uSpeed");
     const uMouseStrength = gl.getUniformLocation(program, "uMouseStrength");
-    if (!uTime || !uColor || !uResolution || !uMouse || !uAmplitude || !uSpeed || !uMouseStrength) {
+    const uMouseActive = gl.getUniformLocation(program, "uMouseActive");
+    const uBrightness = gl.getUniformLocation(program, "uBrightness");
+    const uContrast = gl.getUniformLocation(program, "uContrast");
+    const uLighting = gl.getUniformLocation(program, "uLighting");
+    if (!uTime || !uColor || !uResolution || !uMouse || !uAmplitude || !uSpeed || !uMouseStrength || !uMouseActive || !uBrightness || !uContrast || !uLighting) {
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
       return;
     }
 
     const cursor = { x: 0.5, y: 0.5 };
+    const targetCursor = { x: 0.5, y: 0.5 };
+    let mouseActive = 0;
+    let targetMouseActive = 0;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.floor(rect.width * dpr));
-      const height = Math.max(1, Math.floor(rect.height * dpr));
+      const { width, height } = boundedCanvasSize(rect.width, rect.height);
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -304,28 +335,29 @@ export function Iridescence({
       gl.uniform3f(uResolution, width, height, width / Math.max(1, height));
     };
 
-    const onPointerMove = (event: PointerEvent) => {
+    const unbindPointer = bindWindowPointer(canvas, (pointer) => {
       if (!settings.mouseInteraction) return;
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (event.clientY - rect.top) / rect.height;
-    };
-
-    const onTouchMove = (event: TouchEvent) => {
-      if (!settings.mouseInteraction || event.touches.length === 0) return;
-      const touch = event.touches[0];
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((touch.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (touch.clientY - rect.top) / rect.height;
-    };
+      targetCursor.x = pointer.x;
+      targetCursor.y = pointer.y;
+    }, (isActive) => {
+      targetMouseActive = settings.mouseInteraction && isActive ? 1 : 0;
+    });
+    canvas.style.pointerEvents = "none";
 
     const render = (time: number) => {
       if (disposed) return;
+      cursor.x += (targetCursor.x - cursor.x) * 0.1;
+      cursor.y += (targetCursor.y - cursor.y) * 0.1;
+      mouseActive += (targetMouseActive - mouseActive) * 0.08;
       gl.uniform3f(uColor, settings.color[0], settings.color[1], settings.color[2]);
       gl.uniform2f(uMouse, cursor.x, cursor.y);
       gl.uniform1f(uAmplitude, settings.amplitude);
       gl.uniform1f(uSpeed, settings.speed);
       gl.uniform1f(uMouseStrength, settings.mouseInteraction ? settings.mouseStrength : 0);
+      gl.uniform1f(uMouseActive, mouseActive);
+      gl.uniform1f(uBrightness, settings.brightness);
+      gl.uniform1f(uContrast, settings.contrast);
+      gl.uniform1f(uLighting, settings.lighting);
       gl.uniform1f(uTime, time * 0.001);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       frameId = requestAnimationFrame(render);
@@ -353,13 +385,6 @@ export function Iridescence({
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    if (settings.mouseInteraction) {
-      canvas.addEventListener("pointermove", onPointerMove);
-      canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-      canvas.style.pointerEvents = "auto";
-    } else {
-      canvas.style.pointerEvents = "none";
-    }
     startLoop();
 
     return () => {
@@ -367,8 +392,7 @@ export function Iridescence({
       stopLoop();
       window.removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", handleVisibility);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("touchmove", onTouchMove);
+      unbindPointer();
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
     };
@@ -378,6 +402,9 @@ export function Iridescence({
     settings.color[2],
     settings.speed,
     settings.amplitude,
+    settings.brightness,
+    settings.contrast,
+    settings.lighting,
     settings.mouseInteraction,
     settings.mouseStrength,
     className

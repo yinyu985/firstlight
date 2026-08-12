@@ -8,6 +8,7 @@ import { prettySnapshot } from "../shared/snapshot";
 
 interface Props {
   diff: DiffPayload;
+  busy?: boolean;
   onClose: () => void;
   onUseLeft: () => void;
   onUseRight: () => void;
@@ -44,8 +45,12 @@ const diffDarkTheme = EditorView.theme({
   }
 }, { dark: true });
 
-export function DiffView({ diff, onClose, onUseLeft, onUseRight }: Props) {
+export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const [documents, setDocuments] = useState<{ left: string; right: string }>();
   const [closing, setClosing] = useState(false);
 
@@ -56,6 +61,36 @@ export function DiffView({ diff, onClose, onUseLeft, onUseRight }: Props) {
     });
     return () => { active = false; };
   }, [diff]);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setClosing(true);
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog.current) return;
+      const focusable = Array.from(dialog.current.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previousFocus?.focus();
+    };
+  }, []);
 
   useEffect(() => {
     if (!host.current || !documents) return;
@@ -77,16 +112,16 @@ export function DiffView({ diff, onClose, onUseLeft, onUseRight }: Props) {
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Snapshot comparison">
-      <section className="diff-dialog">
+      <section className="diff-dialog" ref={dialog}>
         <header className="diff-header">
           <h2>SNAPSHOT DIFF</h2>
-          <button className="icon-button" onClick={() => dismiss(onClose)} aria-label="Close"><X size={20} /></button>
+          <button ref={closeRef} className="icon-button" onClick={() => dismiss(onClose)} aria-label="Close"><X size={20} /></button>
         </header>
         <div className="diff-labels"><span>LOCAL CURRENT</span><span>GIST REMOTE</span></div>
         <div className="merge-host" ref={host}>{!documents && <div className="loading">GENERATING LOCAL DIFF…</div>}</div>
         <footer className="diff-actions">
-          <button className="button secondary" onClick={() => dismiss(onUseLeft)}>USE LOCAL</button>
-          <button className="button primary" onClick={() => dismiss(onUseRight)}>USE REMOTE</button>
+          <button className="button secondary" disabled={busy} onClick={() => dismiss(onUseLeft)}>USE LOCAL</button>
+          <button className="button primary" disabled={busy} onClick={() => dismiss(onUseRight)}>USE REMOTE</button>
         </footer>
       </section>
     </div>

@@ -31,9 +31,9 @@ export type ExtensionRequest =
   | { type: "UPLOAD_NOW" }
   | { type: "IMPORT_BOOKMARKS" }
   | { type: "COMPARE_REMOTE" }
-  | { type: "USE_LOCAL" }
-  | { type: "USE_REMOTE" }
-  | { type: "CLEAR_DIFF" }
+  | { type: "USE_LOCAL"; diffId: string }
+  | { type: "USE_REMOTE"; diffId: string }
+  | { type: "CLEAR_DIFF"; diffId: string }
   | { type: "OPEN_BOOKMARK_MANAGER" };
 
 export interface ExtensionResponse {

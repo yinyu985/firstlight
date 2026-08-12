@@ -180,9 +180,9 @@ const WEB_THREADS_PARAMETERS = [
   range("taper", "Taper", 0, 3, 0.05, 1),
   range("position", "Position", 0, 1, 0.01, 0.5),
   select("fanMode", "Fan mode", "center", ["center", "left", "right"]),
-  range("glow", "Glow", 0, 0.06, 0.001, 0.02),
-  range("falloff", "Falloff", 0.3, 1.2, 0.01, 0.6),
-  range("thickness", "Thickness", 0.3, 3, 0.05, 1.1),
+  range("glow", "Glow radius", 0, 0.06, 0.001, 0.02),
+  range("falloff", "Glow softness", 0.3, 1.2, 0.01, 0.6),
+  range("thickness", "Line width", 0.3, 3, 0.05, 1.1),
   range("brightness", "Brightness", 0, 2.5, 0.05, 0.6),
   range("opacity", "Opacity", 0, 1, 0.01, 1),
   toggle("mirror", "Mirror", true),
@@ -317,17 +317,18 @@ const LEGACY_DYNAMIC_ALIASES: Record<string, DynamicEffect> = {
 export const FALLBACK_DYNAMIC_EFFECT: DynamicEffect = "flow";
 
 export function isDynamicEffect(value: unknown): value is DynamicEffect {
-  return typeof value === "string" && value in registry;
+  return typeof value === "string" && Object.hasOwn(registry, value);
 }
 
 export function isDynamicEffectInput(value: unknown): value is DynamicEffect | keyof typeof LEGACY_DYNAMIC_ALIASES {
-  return typeof value === "string" && (value in registry || value in LEGACY_DYNAMIC_ALIASES);
+  return typeof value === "string" && (
+    Object.hasOwn(registry, value) || Object.hasOwn(LEGACY_DYNAMIC_ALIASES, value)
+  );
 }
 
 export function normalizeDynamicEffect(value: unknown): DynamicEffect {
   if (typeof value === "string") {
-    const mapped = LEGACY_DYNAMIC_ALIASES[value];
-    if (mapped) return mapped;
+    if (Object.hasOwn(LEGACY_DYNAMIC_ALIASES, value)) return LEGACY_DYNAMIC_ALIASES[value];
     if (isDynamicEffect(value)) return value;
   }
   return FALLBACK_DYNAMIC_EFFECT;

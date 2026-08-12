@@ -1,10 +1,9 @@
 import {
   GIST_DESCRIPTION,
   SNAPSHOT_FILE_NAME,
-  canonicalSnapshot,
   type Snapshot
 } from "./model";
-import { parseSnapshot } from "./snapshot";
+import { SnapshotValidationError, parseSnapshot, serializeSnapshot, snapshotHash, validateSnapshot } from "./snapshot";
 
 interface GistFile {
   filename?: string;
@@ -18,6 +17,7 @@ interface GistResponse {
   description?: string;
   html_url: string;
   updated_at: string;
+  public: boolean;
   files: Record<string, GistFile>;
 }
 
@@ -55,10 +55,10 @@ export class GistClient {
   }
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
-    let response: Response | undefined;
     const method = init?.method?.toUpperCase() ?? "GET";
     const attempts = method === "GET" ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      let response: Response;
       try {
         response = await fetch(url, {
           ...init,
@@ -71,62 +71,88 @@ export class GistClient {
             ...init?.headers
           }
         });
-        break;
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
-        if (timedOut) throw new GitHubError("GitHub request timed out");
         const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
-        if (interrupted && attempt + 1 < attempts) continue;
+        const networkFailure = error instanceof TypeError;
+        if (method === "GET" && attempt + 1 < attempts && (timedOut || interrupted || networkFailure)) continue;
+        if (timedOut) throw new GitHubError("GitHub request timed out");
         if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.");
+        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error");
         throw error;
       }
+      if (!response.ok) {
+        if (method === "GET" && response.status >= 500 && attempt + 1 < attempts) continue;
+        let detail = "";
+        try { detail = (await response.json() as { message?: string }).message ?? ""; } catch { /* noop */ }
+        throw new GitHubError(detail || `GitHub request failed (${response.status})`, response.status);
+      }
+      return response.json() as Promise<T>;
     }
-    if (!response) throw new GitHubError("GitHub did not return a response");
-    if (!response.ok) {
-      let detail = "";
-      try { detail = (await response.json() as { message?: string }).message ?? ""; } catch { /* noop */ }
-      throw new GitHubError(detail || `GitHub request failed (${response.status})`, response.status);
+    throw new GitHubError("GitHub did not return a response");
+  }
+
+  private assertSecretGist(gist: GistResponse): void {
+    if (gist.public !== false) {
+      throw new GitHubError("Firstlight refuses to sync with a public Gist. Create or select a secret Gist instead.");
     }
-    return response.json() as Promise<T>;
+  }
+
+  private async getSecretGist(gistId: string): Promise<GistResponse> {
+    const gist = await this.request<GistResponse>(`https://api.github.com/gists/${encodeURIComponent(gistId)}`);
+    this.assertSecretGist(gist);
+    return gist;
+  }
+
+  private async readRawFile(rawUrl: string): Promise<string> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetch(rawUrl, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(15_000),
+          headers: { Authorization: `Bearer ${this.token}` }
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
+        const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
+        const networkFailure = error instanceof TypeError;
+        if (attempt === 0 && (timedOut || interrupted || networkFailure)) continue;
+        if (timedOut) throw new GitHubError("GitHub request timed out");
+        if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.");
+        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error");
+        throw error;
+      }
+      if (!response.ok) {
+        if (response.status >= 500 && attempt === 0) continue;
+        throw new GitHubError(`Failed to read the complete snapshot (${response.status})`, response.status);
+      }
+      return response.text();
+    }
+    throw new GitHubError("GitHub did not return the complete snapshot");
   }
 
   async discover(): Promise<Array<Pick<RemoteSnapshot, "gistId" | "htmlUrl" | "updatedAt">>> {
-    const gists = await this.request<GistResponse[]>("https://api.github.com/gists?per_page=100");
-    return gists
-      .filter((gist) => gist.files[SNAPSHOT_FILE_NAME] && gist.description === GIST_DESCRIPTION)
-      .map((gist) => ({ gistId: gist.id, htmlUrl: gist.html_url, updatedAt: gist.updated_at }));
+    const discovered: Array<Pick<RemoteSnapshot, "gistId" | "htmlUrl" | "updatedAt">> = [];
+    for (let page = 1; ; page += 1) {
+      const gists = await this.request<GistResponse[]>(`https://api.github.com/gists?per_page=100&page=${page}`);
+      discovered.push(...gists
+        .filter((gist) => gist.public === false && gist.files[SNAPSHOT_FILE_NAME] && gist.description === GIST_DESCRIPTION)
+        .map((gist) => ({ gistId: gist.id, htmlUrl: gist.html_url, updatedAt: gist.updated_at })));
+      if (gists.length < 100) return discovered;
+    }
   }
 
   async read(gistId: string): Promise<RemoteSnapshot> {
-    const gist = await this.request<GistResponse>(`https://api.github.com/gists/${encodeURIComponent(gistId)}`);
+    const gist = await this.getSecretGist(gistId);
     const file = gist.files[SNAPSHOT_FILE_NAME];
     if (!file) throw new GitHubError(`${SNAPSHOT_FILE_NAME} is missing from the Gist`);
     let content = file.content;
     if (file.truncated || typeof content !== "string") {
       if (!file.raw_url) throw new GitHubError("GitHub did not return a complete snapshot URL");
-      let raw: Response | undefined;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          raw = await fetch(file.raw_url, {
-            cache: "no-store",
-            signal: AbortSignal.timeout(15_000),
-            headers: { Authorization: `Bearer ${this.token}` }
-          });
-          break;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "";
-          const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
-          if (timedOut) throw new GitHubError("GitHub request timed out");
-          const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
-          if (interrupted && attempt === 0) continue;
-          if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.");
-          throw error;
-        }
-      }
-      if (!raw) throw new GitHubError("GitHub did not return the complete snapshot");
-      if (!raw.ok) throw new GitHubError(`Failed to read the complete snapshot (${raw.status})`, raw.status);
-      content = await raw.text();
+      content = await this.readRawFile(file.raw_url);
     }
     return {
       gistId: gist.id,
@@ -141,34 +167,57 @@ export class GistClient {
   }
 
   async update(gistId: string, snapshot: Snapshot): Promise<RemoteSnapshot> {
+    await this.getSecretGist(gistId);
     return this.write(gistId, snapshot);
   }
 
   private async write(gistId: string | undefined, snapshot: Snapshot): Promise<RemoteSnapshot> {
-    const canonical = canonicalSnapshot(snapshot);
-    const content = JSON.stringify(canonical, null, 2);
-    if (new TextEncoder().encode(content).byteLength > 10 * 1024 * 1024) throw new GitHubError("firstlight.json exceeds the 10 MiB API limit");
+    const canonical = validateSnapshot(snapshot);
+    const content = serializeSnapshot(canonical);
+    const expectedHash = await snapshotHash(canonical);
+    const body: {
+      description: string;
+      public?: false;
+      files: Record<string, { content: string }>;
+    } = {
+      description: GIST_DESCRIPTION,
+      files: { [SNAPSHOT_FILE_NAME]: { content } }
+    };
+    if (!gistId) body.public = false;
     const gist = await this.request<GistResponse>(
       gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists",
       {
         method: gistId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description: GIST_DESCRIPTION,
-          public: false,
-          files: { [SNAPSHOT_FILE_NAME]: { content } }
-        })
+        body: JSON.stringify(body)
       }
     );
+    this.assertSecretGist(gist);
     const file = gist.files[SNAPSHOT_FILE_NAME];
+    let remote: RemoteSnapshot;
+    let independentlyRead = false;
     if (file && !file.truncated && typeof file.content === "string") {
-      return {
-        gistId: gist.id,
-        htmlUrl: gist.html_url,
-        updatedAt: gist.updated_at,
-        snapshot: parseSnapshot(file.content)
-      };
+      try {
+        remote = {
+          gistId: gist.id,
+          htmlUrl: gist.html_url,
+          updatedAt: gist.updated_at,
+          snapshot: parseSnapshot(file.content)
+        };
+      } catch (error) {
+        if (!(error instanceof SnapshotValidationError)) throw error;
+        remote = await this.read(gist.id);
+        independentlyRead = true;
+      }
+    } else {
+      remote = await this.read(gist.id);
+      independentlyRead = true;
     }
-    return this.read(gist.id);
+    if (await snapshotHash(remote.snapshot) === expectedHash) return remote;
+    if (!independentlyRead) remote = await this.read(gist.id);
+    if (await snapshotHash(remote.snapshot) !== expectedHash) {
+      throw new GitHubError("GitHub stored a different Firstlight snapshot than the one that was uploaded");
+    }
+    return remote;
   }
 }

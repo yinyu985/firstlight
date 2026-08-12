@@ -1,6 +1,6 @@
 import type { DynamicEffect } from "../shared/dynamicEffects";
-import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { ChevronDown, ChevronRight, Notebook, Search, Settings, X } from "lucide-react";
 import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
 import {
   type ColorParameterDefinition,
@@ -38,9 +38,9 @@ interface Props {
   onUpload?: () => void;
   onImportBookmarks?: () => void;
   onCompareRemote?: () => void;
-  onUseLocal?: () => void;
-  onUseRemote?: () => void | Promise<void>;
-  onCloseDiff?: () => void;
+  onUseLocal?: (diffId: string) => void | Promise<void>;
+  onUseRemote?: (diffId: string) => void | Promise<void>;
+  onCloseDiff?: (diffId: string) => void;
   onOpenBookmarkManager?: () => void;
   onSaveNotes?: (notes: SyncNote[]) => void | Promise<void>;
 }
@@ -145,12 +145,12 @@ interface FolderListProps {
 }
 
 function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<BookmarkItem>>(() => new Set());
   if (!nodes.length) return <div className="folder-empty">EMPTY</div>;
   return <div className="folder-list">
     {nodes.map((item, index) => {
       const isFolder = item.children !== undefined;
-      const isExpanded = expanded.has(index);
+      const isExpanded = expanded.has(item);
       return <div
         className={`folder-entry ${isExpanded ? "is-expanded" : ""}`}
         key={`${item.title}-${index}`}
@@ -162,7 +162,7 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
             if (isFolder) {
               setExpanded((current) => {
                 const next = new Set(current);
-                if (next.has(index)) next.delete(index); else next.add(index);
+                if (next.has(item)) next.delete(item); else next.add(item);
                 return next;
               });
             } else onOpen(item);
@@ -539,13 +539,48 @@ function VisibilityToggle({ visible, onChange }: { visible: boolean; onChange: (
   return <div className="segmented visibility-toggle"><button className={visible ? "selected" : ""} onClick={() => onChange(true)}>SHOW</button><button className={!visible ? "selected" : ""} onClick={() => onChange(false)}>HIDE</button></div>;
 }
 
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+function trapTabKey(event: ReactKeyboardEvent<HTMLElement>): void {
+  if (event.key !== "Tab") return;
+  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter((element) => !element.hasAttribute("hidden"));
+  if (!focusable.length) {
+    event.preventDefault();
+    event.currentTarget.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 export function AppShell(props: Props) {
   const { state } = props;
-  const clock = useClock(state.settings.features.clockSeconds);
+  const clockVisible = state.settings.clockPosition !== "hidden";
+  const clock = useClock(state.settings.features.clockSeconds, clockVisible);
+  const reducedMotion = useReducedMotion();
   const [query, setQuery] = useState("");
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(Boolean(props.openSetupOnLaunch));
-  const [openFolder, setOpenFolder] = useState<number | null>(null);
+  const [openFolder, setOpenFolder] = useState<BookmarkItem | null>(null);
   const [token, setToken] = useState(state.token ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
   const [notesResetKey, setNotesResetKey] = useState(0);
@@ -557,6 +592,7 @@ export function AppShell(props: Props) {
   const searchResultsRef = useRef<HTMLDivElement>(null);
   const syncToastRef = useRef<HTMLDivElement>(null);
   const notesAppRef = useRef<NotesAppHandle>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const [contentBounds, setContentBounds] = useState<{ left: number; width: number }>();
   const results = useMemo(() => searchBookmarks(state.bookmarks, query), [state.bookmarks, query]);
   const readonly = state.target === "online";
@@ -573,10 +609,13 @@ export function AppShell(props: Props) {
   );
   const notificationMessage = showSyncNotice ? state.sync.message : visibleToast?.message;
   const hasNotification = Boolean(notificationMessage);
-  const diffKey = state.diff
-    ? `${state.diff.source}:${state.diff.left.updatedAt}:${state.diff.right.updatedAt}`
-    : undefined;
+  const diffKey = state.diff?.id;
   const visibleDiff = state.diff && diffKey !== dismissedDiffKey ? state.diff : undefined;
+  const busy = Boolean(props.busy);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    window.requestAnimationFrame(() => settingsTriggerRef.current?.focus());
+  }, []);
   const searchResultsTheme = useLocalPanelTheme(
     searchResultsRef,
     state.settings.background,
@@ -605,13 +644,17 @@ export function AppShell(props: Props) {
   }, [remoteOperationActive]);
 
   useEffect(() => {
-    if (!settingsOpen) return;
+    if (!settingsOpen || readonly) return;
     preloadDiffView();
-  }, [settingsOpen]);
+  }, [readonly, settingsOpen]);
 
   useEffect(() => {
     setOpenFolder(null);
   }, [state.settings.layout.rows, state.settings.layout.columns]);
+
+  useEffect(() => {
+    setOpenFolder((current) => current && state.bookmarks.includes(current) ? current : null);
+  }, [state.bookmarks]);
 
   useLayoutEffect(() => {
     const fit = () => {
@@ -663,6 +706,7 @@ export function AppShell(props: Props) {
       setSearchResultsOpen(false);
       setOpenFolder(null);
       setNoteOpen(false);
+      if (settingsOpen) closeSettings();
     };
     document.addEventListener("pointerdown", closeDetachedLists);
     document.addEventListener("keydown", closeOnEscape);
@@ -670,7 +714,7 @@ export function AppShell(props: Props) {
       document.removeEventListener("pointerdown", closeDetachedLists);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, []);
+  }, [closeSettings, settingsOpen]);
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -752,7 +796,7 @@ export function AppShell(props: Props) {
       "--folder-hover": folderTheme.hover,
       "--folder-shadow": folderTheme.shadow
     } as CSSProperties} onClick={() => setOpenFolder(null)}>
-      {activeBackground.type === "dynamic" && <DynamicBackground background={activeBackground} />}
+      {activeBackground.type === "dynamic" && !reducedMotion && <DynamicBackground background={activeBackground} />}
       <div className="scanlines" />
 
       <div
@@ -810,12 +854,12 @@ export function AppShell(props: Props) {
         </div> : <><div className="bookmark-table" ref={gridRef}>
           {state.bookmarks.length ? state.bookmarks.map((item, index) => {
             const folder = item.children !== undefined;
-            const active = openFolder === index;
+            const active = openFolder === item;
             return <div className={`bookmark-cell-wrap ${active ? "active" : ""}`} key={`${item.title}-${index}`}>
               <button
                 className="bookmark-cell"
                 disabled={!folder && item.url !== undefined && !canOpenBookmark(item.url)}
-                onClick={() => folder ? setOpenFolder(active ? null : index) : open(item)}
+                onClick={() => folder ? setOpenFolder(active ? null : item) : open(item)}
               >
                 <span className="cell-content">
                   <span className="cell-name">{item.title || "UNTITLED"}</span>
@@ -828,16 +872,16 @@ export function AppShell(props: Props) {
         </div></>}
       </section>
 
-      <button className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings"><Settings size={20} strokeWidth={1.8} /></button>
+      <button ref={settingsTriggerRef} className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings"><Settings size={20} strokeWidth={1.8} /></button>
 
-      {settingsOpen && <><div className="drawer-backdrop" onClick={() => setSettingsOpen(false)} />
-      <aside className="settings-drawer open" onClick={(event) => event.stopPropagation()}>
-        <header className="drawer-header"><span className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span></header>
+      {settingsOpen && <><div className="drawer-backdrop" aria-hidden="true" onClick={closeSettings} />
+      <aside className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
+        <header className="drawer-header"><span id="settings-title" className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span><button type="button" autoFocus onClick={closeSettings} aria-label="Close settings"><X size={19} /></button></header>
         <div className="drawer-content">
           <section className="settings-section">
-            <div className="section-title"><span>BOOKMARKS</span>{!readonly && <button onClick={props.onOpenBookmarkManager}>OPEN MANAGER ↗</button>}</div>
+            <div className="section-title"><span>BOOKMARKS</span>{!readonly && <button disabled={busy} onClick={props.onOpenBookmarkManager}>OPEN MANAGER ↗</button>}</div>
             <div className="setting-line"><label>Open target</label><div className="segmented"><button className={state.settings.openTarget === "new-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "new-tab" })}>NEW TAB</button><button className={state.settings.openTarget === "current-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "current-tab" })}>CURRENT</button></div></div>
-            {!readonly && <div className="setting-line"><label>Chrome import</label><button className="inline-action" onClick={props.onImportBookmarks}>IMPORT</button></div>}
+            {!readonly && <div className="setting-line"><label>Chrome import</label><button className="inline-action" disabled={busy} onClick={props.onImportBookmarks}>IMPORT</button></div>}
           </section>
 
           <section className="settings-section">
@@ -885,7 +929,7 @@ export function AppShell(props: Props) {
 
           <section className="settings-section">
             <div className="section-title"><span>FOREGROUND</span></div>
-            <div className="setting-line"><label>Interface theme</label><div className="segmented"><button className={state.settings.features.themeMode === "dark" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}>DARK</button><button className={state.settings.features.themeMode === "light" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}>LIGHT</button></div></div>
+            <div className="setting-line"><label>Theme</label><div className="segmented"><button className={state.settings.features.themeMode === "dark" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}>DARK</button><button className={state.settings.features.themeMode === "light" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}>LIGHT</button></div></div>
             <div className="setting-line"><label>Text color</label><input className="color-input" type="color" value={state.settings.foreground.color} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, color: event.target.value } })} /></div>
             <div className="setting-line size-line"><label>Text size <b>{state.settings.foreground.fontSize}px</b></label><input type="range" min="12" max="24" step="1" value={state.settings.foreground.fontSize} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, fontSize: Number(event.target.value) } })} /></div>
             <div className="setting-line"><label>Clock</label><ClockPicker value={state.settings.clockPosition} onChange={(clockPosition) => updateSettings({ ...state.settings, clockPosition })} /></div>
@@ -907,11 +951,11 @@ export function AppShell(props: Props) {
 
           <section className="settings-section">
             <div className="section-title"><span>SYNC</span><i className={`phase-${state.sync.phase}`}>{state.sync.gistId ? "ON" : "OFF"}</i></div>
-            <div className="token-row"><input type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / ENTER TO REPLACE" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={!token.trim()} onClick={() => props.onSaveToken?.(token)}>SAVE</button></div>
+            <div className="token-row"><input type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token)}>{state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}</button></div>
             {!readonly && <div className="compact-actions sync-actions">
-              <button disabled={!state.tokenConfigured} onClick={props.onUpload}>UPLOAD</button>
+              <button disabled={busy || !state.tokenConfigured} onClick={props.onUpload}>UPLOAD</button>
               <button
-                disabled={!state.tokenConfigured}
+                disabled={busy || !state.tokenConfigured}
                 onMouseEnter={preloadDiffView}
                 onFocus={preloadDiffView}
                 onPointerDown={preloadDiffView}
@@ -931,21 +975,24 @@ export function AppShell(props: Props) {
         <DiffView
         key={diffKey}
         diff={visibleDiff}
-        onClose={() => { setDismissedDiffKey(diffKey); props.onCloseDiff?.(); }}
+        busy={busy}
+        onClose={() => { setDismissedDiffKey(diffKey); props.onCloseDiff?.(diffKey); }}
         onUseLeft={() => {
           setDismissedDiffKey(diffKey);
-          (props.onUseLocal ?? props.onCloseDiff)?.();
+          const action = props.onUseLocal ? props.onUseLocal(diffKey) : props.onCloseDiff?.(diffKey);
+          void Promise.resolve(action).catch(() => setDismissedDiffKey(undefined));
         }}
         onUseRight={() => {
           setDismissedDiffKey(diffKey);
           notesAppRef.current?.pausePersistence();
           if (!props.onUseRemote) {
-            props.onCloseDiff?.();
+            props.onCloseDiff?.(diffKey);
             return;
           }
-          void Promise.resolve(props.onUseRemote()).then(() => {
+          void Promise.resolve(props.onUseRemote(diffKey)).then(() => {
             setNotesResetKey((current) => current + 1);
           }).catch(() => {
+            setDismissedDiffKey(undefined);
             notesAppRef.current?.resumePersistence();
           });
         }}

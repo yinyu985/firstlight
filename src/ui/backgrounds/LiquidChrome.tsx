@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
+import { bindWindowPointer } from "./pointerTracking";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -21,6 +23,9 @@ interface LiquidChromeSettings {
   amplitude: number;
   frequencyX: number;
   frequencyY: number;
+  brightness: number;
+  contrast: number;
+  lighting: number;
   mouseInteraction: boolean;
   mouseStrength: number;
 }
@@ -31,6 +36,9 @@ export const LIQUID_CHROME_DEFAULTS = {
   amplitude: 0.2,
   frequencyX: 3,
   frequencyY: 2,
+  brightness: 1,
+  contrast: 1,
+  lighting: 0,
   mouseInteraction: true,
   mouseStrength: 1
 } as const;
@@ -40,6 +48,9 @@ export const LIQUID_CHROME_RANGES = {
   amplitude: { min: 0.02, max: 0.3, step: 0.01 },
   frequencyX: { min: 0.5, max: 12, step: 0.1 },
   frequencyY: { min: 0.5, max: 12, step: 0.1 },
+  brightness: { min: 0, max: 2, step: 0.01 },
+  contrast: { min: 0, max: 3, step: 0.01 },
+  lighting: { min: 0, max: 1, step: 0.01 },
   mouseStrength: { min: 0, max: 3, step: 0.05 }
 } as const;
 
@@ -65,27 +76,35 @@ uniform float uAmplitude;
 uniform float uFrequencyX;
 uniform float uFrequencyY;
 uniform vec2 uMouse;
+uniform vec2 uMouseDirection;
 uniform float uMouseStrength;
+uniform float uMouseActive;
+uniform float uBrightness;
+uniform float uContrast;
+uniform float uLighting;
 
 varying vec2 vUv;
 
 vec4 renderImage(vec2 uvCoord) {
     vec2 fragCoord = uvCoord * uResolution.xy;
     vec2 uv = (2.0 * fragCoord - uResolution.xy) / min(uResolution.x, uResolution.y);
+    vec2 mousePoint = (2.0 * uMouse * uResolution.xy - uResolution.xy) / min(uResolution.x, uResolution.y);
+    vec2 mouseDelta = uv - mousePoint;
+    float influence = exp(-dot(mouseDelta, mouseDelta) * 3.5) * uMouseStrength * uMouseActive;
+    vec2 flowDirection = normalize(uMouseDirection + vec2(0.0001));
+    vec2 flowNormal = vec2(-flowDirection.y, flowDirection.x);
+    float crossFlow = dot(mouseDelta, flowNormal);
+    uv += flowDirection * sin(crossFlow * 11.0 - uTime * 1.4) * influence * uAmplitude * 0.42;
 
     for (float i = 1.0; i < 10.0; i++) {
-        uv.x += uAmplitude / i * cos(i * uFrequencyX * uv.y + uTime + uMouse.x * 3.14159);
-        uv.y += uAmplitude / i * cos(i * uFrequencyY * uv.x + uTime + uMouse.y * 3.14159);
+        uv.x += uAmplitude / i * cos(i * uFrequencyX * uv.y + uTime);
+        uv.y += uAmplitude / i * cos(i * uFrequencyY * uv.x + uTime);
     }
 
-    vec2 diff = (uvCoord - uMouse);
-    float dist = length(diff);
-    float falloff = exp(-dist * 20.0);
-    float ripple = sin(10.0 * dist - uTime * 2.0) * 0.03;
-    uv += (dist > 0.0001 ? diff / dist : vec2(0.0)) * ripple * falloff * uMouseStrength;
-
-    vec3 color = uBaseColor / abs(sin(uTime - uv.y - uv.x));
-    return vec4(color, 1.0);
+    vec3 color = uBaseColor / max(abs(sin(uTime - uv.y - uv.x)), 0.045);
+    color = (color - 0.5) * uContrast + 0.5;
+    color = color * uBrightness + vec3(uLighting * (0.08 + influence * 0.12));
+    return vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 
 void main() {
@@ -228,6 +247,9 @@ export function resolveLiquidChromeSettings(props: LiquidChromeProps): LiquidChr
     ),
     frequencyX: clamp(getNumber(params.frequencyX, LIQUID_CHROME_DEFAULTS.frequencyX), LIQUID_CHROME_RANGES.frequencyX.min, LIQUID_CHROME_RANGES.frequencyX.max),
     frequencyY: clamp(getNumber(params.frequencyY, LIQUID_CHROME_DEFAULTS.frequencyY), LIQUID_CHROME_RANGES.frequencyY.min, LIQUID_CHROME_RANGES.frequencyY.max),
+    brightness: clamp(getNumber(params.brightness, LIQUID_CHROME_DEFAULTS.brightness), LIQUID_CHROME_RANGES.brightness.min, LIQUID_CHROME_RANGES.brightness.max),
+    contrast: clamp(getNumber(params.contrast, LIQUID_CHROME_DEFAULTS.contrast), LIQUID_CHROME_RANGES.contrast.min, LIQUID_CHROME_RANGES.contrast.max),
+    lighting: clamp(getNumber(params.lighting, LIQUID_CHROME_DEFAULTS.lighting), LIQUID_CHROME_RANGES.lighting.min, LIQUID_CHROME_RANGES.lighting.max),
     mouseInteraction: getBoolean(
       props.mouseInteraction,
       getBoolean(params.mouseInteraction, getBoolean(params.interactive, LIQUID_CHROME_DEFAULTS.mouseInteraction))
@@ -327,20 +349,28 @@ export function LiquidChrome({
     const uFrequencyX = gl.getUniformLocation(program, "uFrequencyX");
     const uFrequencyY = gl.getUniformLocation(program, "uFrequencyY");
     const uMouse = gl.getUniformLocation(program, "uMouse");
+    const uMouseDirection = gl.getUniformLocation(program, "uMouseDirection");
     const uMouseStrength = gl.getUniformLocation(program, "uMouseStrength");
-    if (!uTime || !uResolution || !uBaseColor || !uAmplitude || !uFrequencyX || !uFrequencyY || !uMouse || !uMouseStrength) {
+    const uMouseActive = gl.getUniformLocation(program, "uMouseActive");
+    const uBrightness = gl.getUniformLocation(program, "uBrightness");
+    const uContrast = gl.getUniformLocation(program, "uContrast");
+    const uLighting = gl.getUniformLocation(program, "uLighting");
+    if (!uTime || !uResolution || !uBaseColor || !uAmplitude || !uFrequencyX || !uFrequencyY || !uMouse || !uMouseDirection || !uMouseStrength || !uMouseActive || !uBrightness || !uContrast || !uLighting) {
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
       return;
     }
 
     const cursor = { x: 0.5, y: 0.5 };
+    const targetCursor = { x: 0.5, y: 0.5 };
+    const direction = { x: 1, y: 0 };
+    const targetDirection = { x: 1, y: 0 };
+    let mouseActive = 0;
+    let targetMouseActive = 0;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.floor(rect.width * dpr));
-      const height = Math.max(1, Math.floor(rect.height * dpr));
+      const { width, height } = boundedCanvasSize(rect.width, rect.height);
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -349,30 +379,41 @@ export function LiquidChrome({
       gl.uniform3f(uResolution, width, height, width / Math.max(1, height));
     };
 
-    const onPointerMove = (event: PointerEvent) => {
+    const unbindPointer = bindWindowPointer(canvas, (pointer) => {
       if (!settings.mouseInteraction) return;
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (event.clientY - rect.top) / rect.height;
-    };
-
-    const onTouchMove = (event: TouchEvent) => {
-      if (!settings.mouseInteraction || event.touches.length === 0) return;
-      const touch = event.touches[0];
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((touch.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (touch.clientY - rect.top) / rect.height;
-    };
+      const dx = pointer.x - targetCursor.x;
+      const dy = pointer.y - targetCursor.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 0.0001) {
+        targetDirection.x = dx / distance;
+        targetDirection.y = dy / distance;
+      }
+      targetCursor.x = pointer.x;
+      targetCursor.y = pointer.y;
+    }, (isActive) => {
+      targetMouseActive = settings.mouseInteraction && isActive ? 1 : 0;
+    });
+    canvas.style.pointerEvents = "none";
 
     const render = (time: number) => {
       if (disposed) return;
+      cursor.x += (targetCursor.x - cursor.x) * 0.1;
+      cursor.y += (targetCursor.y - cursor.y) * 0.1;
+      direction.x += (targetDirection.x - direction.x) * 0.08;
+      direction.y += (targetDirection.y - direction.y) * 0.08;
+      mouseActive += (targetMouseActive - mouseActive) * 0.08;
       gl.uniform1f(uTime, time * 0.001 * settings.speed);
       gl.uniform3f(uBaseColor, settings.baseColor[0], settings.baseColor[1], settings.baseColor[2]);
       gl.uniform1f(uAmplitude, settings.amplitude);
       gl.uniform1f(uFrequencyX, settings.frequencyX);
       gl.uniform1f(uFrequencyY, settings.frequencyY);
       gl.uniform2f(uMouse, cursor.x, cursor.y);
+      gl.uniform2f(uMouseDirection, direction.x, direction.y);
       gl.uniform1f(uMouseStrength, settings.mouseInteraction ? settings.mouseStrength : 0);
+      gl.uniform1f(uMouseActive, mouseActive);
+      gl.uniform1f(uBrightness, settings.brightness);
+      gl.uniform1f(uContrast, settings.contrast);
+      gl.uniform1f(uLighting, settings.lighting);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       frameId = requestAnimationFrame(render);
     };
@@ -398,14 +439,6 @@ export function LiquidChrome({
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    if (settings.mouseInteraction) {
-      canvas.addEventListener("pointermove", onPointerMove);
-      canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-      canvas.style.pointerEvents = "auto";
-    } else {
-      canvas.style.pointerEvents = "none";
-    }
-
     startLoop();
 
     return () => {
@@ -413,8 +446,7 @@ export function LiquidChrome({
       stopLoop();
       window.removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", handleVisibility);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("touchmove", onTouchMove);
+      unbindPointer();
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
     };
@@ -426,6 +458,9 @@ export function LiquidChrome({
     settings.amplitude,
     settings.frequencyX,
     settings.frequencyY,
+    settings.brightness,
+    settings.contrast,
+    settings.lighting,
     settings.mouseInteraction,
     settings.mouseStrength,
     className

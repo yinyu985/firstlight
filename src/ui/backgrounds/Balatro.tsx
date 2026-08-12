@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
+import { bindWindowPointer } from "./pointerTracking";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -94,12 +96,19 @@ uniform float uSpinEase;
 uniform bool uIsRotate;
 uniform vec2 uMouse;
 uniform float uMouseStrength;
+uniform float uMouseActive;
 
 varying vec2 vUv;
 
 vec4 effect(vec2 screenSize, vec2 screen_coords) {
     float pixel_size = length(screenSize.xy) / uPixelFilter;
     vec2 uv = (floor(screen_coords.xy * (1.0 / pixel_size)) * pixel_size - 0.5 * screenSize.xy) / length(screenSize.xy) - uOffset;
+    vec2 mousePoint = (uMouse * screenSize.xy - 0.5 * screenSize.xy) / length(screenSize.xy) - uOffset;
+    vec2 mouseDelta = uv - mousePoint;
+    float mouseInfluence = exp(-dot(mouseDelta, mouseDelta) * 55.0) * uMouseStrength * uMouseActive;
+    float localTurn = mouseInfluence * 1.15;
+    mat2 mouseRotation = mat2(cos(localTurn), -sin(localTurn), sin(localTurn), cos(localTurn));
+    uv = mousePoint + mouseRotation * mouseDelta;
     float uv_len = length(uv);
 
     float speed = (uSpinRotation * uSpinEase * 0.2);
@@ -108,16 +117,13 @@ vec4 effect(vec2 screenSize, vec2 screen_coords) {
     }
     speed += 302.2;
 
-    float mouseInfluence = (uMouse.x * 2.0 - 1.0) * uMouseStrength;
-    speed += mouseInfluence * 0.1;
-
     float new_pixel_angle = atan(uv.y, uv.x) + speed - uSpinEase * 20.0 * (uSpinAmount * uv_len + (1.0 - uSpinAmount));
     vec2 mid = (screenSize.xy / length(screenSize.xy)) / 2.0;
     uv = (vec2(uv_len * cos(new_pixel_angle) + mid.x, uv_len * sin(new_pixel_angle) + mid.y) - mid);
 
     uv *= 30.0;
     float baseSpeed = iTime * uSpinSpeed;
-    speed = baseSpeed + mouseInfluence * 2.0;
+    speed = baseSpeed;
 
     vec2 uv2 = vec2(uv.x + uv.y);
 
@@ -273,7 +279,7 @@ export function resolveBalatroSettings(props: BalatroProps): BalatroSettings {
     color1: from,
     color2: to,
     color3,
-    contrast,
+    contrast: clamp(contrast, BALATRO_RANGES.contrast.min, BALATRO_RANGES.contrast.max),
     lighting: clamp(lighting, BALATRO_RANGES.lighting.min, BALATRO_RANGES.lighting.max),
     spinAmount: clamp(spinAmount, BALATRO_RANGES.spinAmount.min, BALATRO_RANGES.spinAmount.max),
     pixelFilter: clamp(pixelFilter, BALATRO_RANGES.pixelFilter.min, BALATRO_RANGES.pixelFilter.max),
@@ -365,6 +371,7 @@ export function Balatro({
     const uIsRotate = gl.getUniformLocation(program, "uIsRotate");
     const uMouse = gl.getUniformLocation(program, "uMouse");
     const uMouseStrength = gl.getUniformLocation(program, "uMouseStrength");
+    const uMouseActive = gl.getUniformLocation(program, "uMouseActive");
     if (
       !uTime ||
       !uResolution ||
@@ -381,7 +388,8 @@ export function Balatro({
       !uSpinEase ||
       !uIsRotate ||
       !uMouse ||
-      !uMouseStrength
+      !uMouseStrength ||
+      !uMouseActive
     ) {
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
@@ -389,12 +397,13 @@ export function Balatro({
     }
 
     const cursor = { x: 0.5, y: 0.5 };
+    const targetCursor = { x: 0.5, y: 0.5 };
+    let mouseActive = 0;
+    let targetMouseActive = 0;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.floor(rect.width * dpr));
-      const height = Math.max(1, Math.floor(rect.height * dpr));
+      const { width, height } = boundedCanvasSize(rect.width, rect.height);
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -403,23 +412,20 @@ export function Balatro({
       gl.uniform3f(uResolution, width, height, width / Math.max(1, height));
     };
 
-    const onPointerMove = (event: PointerEvent) => {
+    const unbindPointer = bindWindowPointer(canvas, (pointer) => {
       if (!settings.mouseInteraction) return;
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (event.clientY - rect.top) / rect.height;
-    };
-
-    const onTouchMove = (event: TouchEvent) => {
-      if (!settings.mouseInteraction || event.touches.length === 0) return;
-      const t = event.touches[0];
-      const rect = canvas.getBoundingClientRect();
-      cursor.x = clamp((t.clientX - rect.left) / rect.width, 0, 1);
-      cursor.y = 1 - (t.clientY - rect.top) / rect.height;
-    };
+      targetCursor.x = pointer.x;
+      targetCursor.y = pointer.y;
+    }, (isActive) => {
+      targetMouseActive = settings.mouseInteraction && isActive ? 1 : 0;
+    });
+    canvas.style.pointerEvents = "none";
 
     const render = (time: number) => {
       if (disposed) return;
+      cursor.x += (targetCursor.x - cursor.x) * 0.1;
+      cursor.y += (targetCursor.y - cursor.y) * 0.1;
+      mouseActive += (targetMouseActive - mouseActive) * 0.08;
       gl.uniform1f(uTime, time * 0.001);
       gl.uniform3f(uResolution, gl.canvas.width, gl.canvas.height, gl.canvas.width / Math.max(1, gl.canvas.height));
       gl.uniform1f(uSpinRotation, settings.spinRotation);
@@ -436,6 +442,7 @@ export function Balatro({
       gl.uniform1i(uIsRotate, settings.isRotate ? 1 : 0);
       gl.uniform2f(uMouse, cursor.x, cursor.y);
       gl.uniform1f(uMouseStrength, settings.mouseInteraction ? settings.mouseStrength : 0);
+      gl.uniform1f(uMouseActive, mouseActive);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       frameId = requestAnimationFrame(render);
     };
@@ -461,22 +468,13 @@ export function Balatro({
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    if (settings.mouseInteraction) {
-      canvas.addEventListener("pointermove", onPointerMove);
-      canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-      canvas.style.pointerEvents = "auto";
-    } else {
-      canvas.style.pointerEvents = "none";
-    }
-
     startLoop();
     return () => {
       disposed = true;
       stopLoop();
       window.removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", handleVisibility);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("touchmove", onTouchMove);
+      unbindPointer();
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
     };

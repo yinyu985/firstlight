@@ -65,15 +65,32 @@ function parseState(raw: string | null): StoredNotesState {
 
 export function loadNotesState(): StoredNotesState {
   if (typeof window === "undefined") return EMPTY_STATE;
-  return parseState(window.localStorage.getItem(NOTES_KEY));
+  try {
+    return parseState(window.localStorage.getItem(NOTES_KEY));
+  } catch {
+    return EMPTY_STATE;
+  }
 }
 
 export function saveNotesState(state: StoredNotesState): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(NOTES_KEY, JSON.stringify(state));
+  try {
+    window.localStorage.setItem(NOTES_KEY, JSON.stringify(state));
+  } catch {
+    // Storage may be disabled; notes remain available for the current session.
+  }
+}
+
+export function saveNotesSortMode(sortMode: NoteSortMode): void {
+  const current = loadNotesState();
+  saveNotesState({ ...current, sortMode });
 }
 
 export function clearNotesState(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(NOTES_KEY);
+  try {
+    window.localStorage.removeItem(NOTES_KEY);
+  } catch {
+    // Nothing else can be cleared when storage access is denied.
+  }
 }

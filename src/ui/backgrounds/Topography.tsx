@@ -1,4 +1,5 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
 import type { DynamicEffectParameters } from "../../shared/dynamicEffects";
 
 type Color = readonly [number, number, number];
@@ -449,9 +450,7 @@ export function Topography({ className = "dynamic-background", ...props }: Topog
       const bounds = canvas.getBoundingClientRect();
       const cssWidth = Math.max(1, bounds.width || window.innerWidth);
       const cssHeight = Math.max(1, bounds.height || window.innerHeight);
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      const width = Math.max(1, Math.round(cssWidth * dpr));
-      const height = Math.max(1, Math.round(cssHeight * dpr));
+      const { width, height } = boundedCanvasSize(cssWidth, cssHeight);
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;

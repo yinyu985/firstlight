@@ -1,4 +1,5 @@
 import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
 
 export type DotGridParameters = {
   dotSize?: number;
@@ -280,9 +281,7 @@ export function DotGrid({
       return;
     }
 
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const scaledWidth = Math.max(1, Math.floor(width * dpr));
-    const scaledHeight = Math.max(1, Math.floor(height * dpr));
+    const { width: scaledWidth, height: scaledHeight, dpr } = boundedCanvasSize(width, height);
     canvas.width = scaledWidth;
     canvas.height = scaledHeight;
     canvas.style.width = `${width}px`;

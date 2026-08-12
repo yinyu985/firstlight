@@ -122,9 +122,18 @@ export interface ToastNotice {
 }
 
 export interface DiffPayload {
+  id: string;
   source: "remote";
+  leftHash: string;
+  rightHash: string;
+  gistId: string;
+  remoteUpdatedAt: string;
   left: Snapshot;
   right: Snapshot;
+}
+
+export function createDiffId(source: "remote", leftHash: string, rightHash: string, remoteUpdatedAt: string): string {
+  return `${source}:${leftHash}:${rightHash}:${remoteUpdatedAt}`;
 }
 
 export const DEFAULT_SETTINGS: SyncedSettings = {

@@ -1,20 +1,21 @@
 import { GistClient, GitHubError, normalizeGitHubToken, type RemoteSnapshot } from "../shared/gist";
 import {
   DEFAULT_SETTINGS,
-  type ClockPosition,
+  SNAPSHOT_SCHEMA_VERSION,
   type BookmarkItem,
+  type DiffPayload,
   type SyncNote,
   type RecoveryPoint,
   type RecoveryReason,
   type Snapshot,
   type SyncStatus,
   type SyncedSettings,
+  createDiffId,
   snapshotFrom,
   eastEightTimestamp,
   settingsFromSnapshot
 } from "../shared/model";
 import {
-  isDynamicSpeedValid,
   normalizeDynamicEffect,
   normalizeDynamicParameters,
   normalizeDynamicSpeed
@@ -34,14 +35,55 @@ let operation = Promise.resolve();
 let startupRemoteCheckPending = false;
 let startupRemoteCheckRequested = false;
 let openSetupOnLaunch = false;
-const SEARCH_TEXT_OPTIONS: readonly ClockPosition[] = ["hidden", "left", "center", "right"];
 
-const isSearchTextPosition = (value: unknown): value is ClockPosition => value === "hidden" || value === "left" || value === "center" || value === "right";
+class HandledOperationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HandledOperationError";
+  }
+}
 
 function queue<T>(task: () => Promise<T>): Promise<T> {
   const next = operation.then(task, task);
   operation = next.then(() => undefined, () => undefined);
   return next;
+}
+
+function cancelScheduledUpload(): void {
+  if (!uploadTimer) return;
+  clearTimeout(uploadTimer);
+  uploadTimer = undefined;
+}
+
+function remoteDiff(
+  left: Snapshot,
+  remote: Pick<RemoteSnapshot, "gistId" | "updatedAt" | "snapshot">,
+  leftHash: string,
+  rightHash: string
+): DiffPayload {
+  return {
+    id: createDiffId("remote", leftHash, rightHash, remote.updatedAt),
+    source: "remote",
+    leftHash,
+    rightHash,
+    gistId: remote.gistId,
+    remoteUpdatedAt: remote.updatedAt,
+    left,
+    right: remote.snapshot
+  };
+}
+
+async function createRemoteDiff(left: Snapshot, remote: RemoteSnapshot): Promise<DiffPayload> {
+  const [leftHash, rightHash] = await Promise.all([snapshotHash(left), snapshotHash(remote.snapshot)]);
+  return remoteDiff(left, remote, leftHash, rightHash);
+}
+
+function requirePendingDiff(diffId: string): DiffPayload {
+  const diff = memory.pendingDiff;
+  if (!diff || diff.id !== diffId) {
+    throw new HandledOperationError("The comparison changed. Review the latest diff before choosing a snapshot.");
+  }
+  return diff;
 }
 
 async function saveMemory(): Promise<void> {
@@ -113,6 +155,24 @@ function currentSnapshot(): Snapshot {
   return snapshotFrom(bookmarks, currentSettings(), memory.notes ?? [], localUpdatedAt());
 }
 
+async function refreshPendingDiffLeft(local = currentSnapshot()): Promise<void> {
+  const diff = memory.pendingDiff;
+  if (!diff) return;
+  const leftHash = await snapshotHash(local);
+  if (leftHash === diff.leftHash) return;
+  memory.pendingDiff = remoteDiff(local, {
+    gistId: diff.gistId,
+    updatedAt: diff.remoteUpdatedAt,
+    snapshot: diff.right
+  }, leftHash, diff.rightHash);
+  memory.sync = {
+    phase: "conflict",
+    message: "Local data changed. Review the updated comparison.",
+    gistId: diff.gistId,
+    remoteUpdatedAt: diff.remoteUpdatedAt
+  };
+}
+
 function normalizeNotes(raw: unknown): SyncNote[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -165,6 +225,17 @@ async function setStatus(status: SyncStatus): Promise<void> {
   broadcast();
 }
 
+async function setStatusBestEffort(status: SyncStatus): Promise<void> {
+  try {
+    await setStatus(status);
+  } catch {
+    memory.sync = status;
+    if (status.phase === "error" || status.phase === "conflict") {
+      memory.toast = { id: crypto.randomUUID(), message: status.message, expiresAt: Date.now() + 10_000 };
+    }
+  }
+}
+
 async function publishToast(message: string): Promise<void> {
   memory.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 5_000 };
   await saveMemory();
@@ -185,6 +256,9 @@ async function saveRecovery(snapshot: Snapshot, reason: RecoveryReason): Promise
 
 async function establishBaseline(snapshot: Snapshot, remote: RemoteSnapshot): Promise<void> {
   const [localHash, remoteHash] = await Promise.all([snapshotHash(snapshot), snapshotHash(remote.snapshot)]);
+  if (localHash !== remoteHash) {
+    throw new Error("Cannot establish a sync baseline for different local and remote snapshots");
+  }
   memory.baseline = { localHash, remoteHash, remoteUpdatedAt: remote.updatedAt };
   memory.syncEnabled = true;
   memory.gistId = remote.gistId;
@@ -202,11 +276,16 @@ async function establishBaseline(snapshot: Snapshot, remote: RemoteSnapshot): Pr
 
 async function restoreSnapshot(target: Snapshot, reason: RecoveryReason): Promise<void> {
   validateSnapshot(target);
-  const before = currentSnapshot();
-  await saveRecovery(before, reason);
+  cancelScheduledUpload();
   restoring = true;
-  await setStatus({ phase: "restoring", message: "Restoring bookmarks…", gistId: memory.gistId });
+  let before: Snapshot | undefined;
+  let mutationStarted = false;
   try {
+    bookmarks = await readBookmarks();
+    before = currentSnapshot();
+    await saveRecovery(before, reason);
+    await setStatus({ phase: "restoring", message: "Restoring bookmarks…", gistId: memory.gistId });
+    mutationStarted = true;
     await overwriteBookmarks(target.bookmarks);
     memory.settings = settingsFromSnapshot(target);
     bookmarks = await readBookmarks();
@@ -218,6 +297,14 @@ async function restoreSnapshot(target: Snapshot, reason: RecoveryReason): Promis
     memory.localUpdatedAt = target.updatedAt;
     await saveMemory();
   } catch (error) {
+    const restoreError = errorMessage(error);
+    if (!mutationStarted || !before) {
+      const message = `Restore did not start: ${restoreError}`;
+      await setStatusBestEffort({ phase: "error", message, gistId: memory.gistId });
+      throw new HandledOperationError(message);
+    }
+
+    let rollbackError: unknown;
     try {
       await overwriteBookmarks(before.bookmarks);
       memory.settings = settingsFromSnapshot(before);
@@ -226,11 +313,23 @@ async function restoreSnapshot(target: Snapshot, reason: RecoveryReason): Promis
       const rollback = snapshotFrom(bookmarks, memory.settings, memory.notes, before.updatedAt);
       if (await snapshotHash(rollback) !== await snapshotHash(before)) throw new Error("Rollback verification failed");
       memory.localUpdatedAt = before.updatedAt;
-      await setStatus({ phase: "error", message: `Restore failed and was rolled back: ${errorMessage(error)}`, gistId: memory.gistId });
-    } catch (rollbackError) {
-      await setStatus({ phase: "error", message: `Restore and rollback both failed: ${errorMessage(rollbackError)}`, gistId: memory.gistId });
+      await saveMemory();
+    } catch (errorDuringRollback) {
+      rollbackError = errorDuringRollback;
     }
-    throw error;
+
+    if (rollbackError !== undefined) {
+      cancelScheduledUpload();
+      memory.syncEnabled = false;
+      memory.baseline = undefined;
+      const message = `Restore failed: ${restoreError}. Rollback also failed: ${errorMessage(rollbackError)}`;
+      await setStatusBestEffort({ phase: "error", message, gistId: memory.gistId });
+      throw new HandledOperationError(message);
+    }
+
+    const message = `Restore failed and was rolled back: ${restoreError}`;
+    await setStatusBestEffort({ phase: "error", message, gistId: memory.gistId });
+    throw new HandledOperationError(message);
   } finally {
     restoring = false;
   }
@@ -247,6 +346,7 @@ function isBadCredentials(error: unknown): boolean {
 }
 
 async function deactivateRemoteSync(message = "Remote auth failed. Check your GitHub token"): Promise<void> {
+  cancelScheduledUpload();
   memory.syncEnabled = false;
   memory.gistId = undefined;
   memory.gistUrl = undefined;
@@ -283,7 +383,7 @@ async function resolveGist(client: GistClient, create: boolean, beforeCreate?: (
   }
   if (!create) return undefined;
   await beforeCreate?.();
-  return client.create(currentSnapshot());
+  return client.create(validateSnapshot(currentSnapshot()));
 }
 
 async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
@@ -298,7 +398,7 @@ async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
       await setStatus({ phase: "local-only", message: "Remote not configured" });
       return;
     }
-    const local = currentSnapshot();
+    const local = validateSnapshot(currentSnapshot());
     const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
     if (localHash !== remoteHash) {
       if (memory.baseline && remoteHash === memory.baseline.remoteHash) {
@@ -310,7 +410,7 @@ async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
         await publishToast("Uploaded to remote");
         return;
       }
-      memory.pendingDiff = { source: "remote", left: local, right: remote.snapshot };
+      memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
       memory.gistUrl = remote.htmlUrl;
       await setStatus({ phase: "conflict", message: "Local and remote differ. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
     } else {
@@ -341,9 +441,9 @@ function scheduleStartupRemoteCheck(): void {
 }
 
 async function upload(force = false): Promise<void> {
+  bookmarks = await readBookmarks();
+  const local = validateSnapshot(currentSnapshot());
   try {
-    bookmarks = await readBookmarks();
-    const local = currentSnapshot();
     const client = await connectedClient();
     await setStatus({ phase: "uploading", message: memory.gistId ? "Uploading…" : "Creating remote snapshot…", gistId: memory.gistId });
     let remote: RemoteSnapshot | undefined;
@@ -360,7 +460,7 @@ async function upload(force = false): Promise<void> {
         remote.updatedAt
       );
       if (decision === "conflict" || decision === "restore") {
-        memory.pendingDiff = { source: "remote", left: local, right: remote.snapshot };
+        memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
         memory.gistUrl = remote.htmlUrl;
         await setStatus({ phase: "conflict", message: "Remote changed. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
         return;
@@ -372,7 +472,7 @@ async function upload(force = false): Promise<void> {
     } else if (!memory.baseline && memory.gistId && !force) {
       const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
       if (localHash !== remoteHash) {
-        memory.pendingDiff = { source: "remote", left: local, right: remote.snapshot };
+        memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
         memory.gistUrl = remote.htmlUrl;
         await setStatus({ phase: "conflict", message: "Choose the local or remote snapshot", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
         return;
@@ -393,7 +493,6 @@ async function upload(force = false): Promise<void> {
     }
     if (force && error instanceof SnapshotValidationError && memory.gistId) {
       const client = await connectedClient();
-      const local = currentSnapshot();
       const remote = await client.update(memory.gistId, local);
       const [remoteHash, localHash] = await Promise.all([snapshotHash(remote.snapshot), snapshotHash(local)]);
       if (remoteHash !== localHash) throw new Error("Remote verification failed after replacing the invalid snapshot");
@@ -409,18 +508,30 @@ async function upload(force = false): Promise<void> {
 async function importFromChrome(): Promise<void> {
   bookmarks = await readBookmarks();
   memory.localUpdatedAt = touchLocalUpdatedAt();
+  await refreshPendingDiffLeft();
   await saveMemory();
   scheduleUpload();
   await publishToast("Chrome bookmarks imported");
 }
 
 function scheduleUpload(): void {
-  if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) return;
-  if (uploadTimer) clearTimeout(uploadTimer);
+  if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) {
+    cancelScheduledUpload();
+    return;
+  }
+  cancelScheduledUpload();
   uploadTimer = setTimeout(() => {
-    queue(() => upload(false)).catch(async (error) => {
-      if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
-      else await setStatus({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+    uploadTimer = undefined;
+    queue(async () => {
+      if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) return;
+      await upload(false);
+    }).catch(async (error) => {
+      try {
+        if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
+        else await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+      } catch {
+        // The in-memory status has already been updated as far as possible.
+      }
     });
   }, 10_000);
 }
@@ -431,17 +542,17 @@ async function compareRemote(): Promise<void> {
     const remote = await resolveGist(client, false);
     if (!remote) throw new Error("No remote snapshot found");
     bookmarks = await readBookmarks();
-    const local = currentSnapshot();
-    if (await snapshotHash(local) === await snapshotHash(remote.snapshot)) {
+    const local = validateSnapshot(currentSnapshot());
+    const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
+    if (localHash === remoteHash) {
       memory.pendingDiff = undefined;
       await establishBaseline(local, remote);
       await publishToast("Local and remote match");
       return;
     }
-    memory.pendingDiff = { source: "remote", left: local, right: remote.snapshot };
+    memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
     memory.gistUrl = remote.htmlUrl;
-    await saveMemory();
-    broadcast();
+    await setStatus({ phase: "conflict", message: "Local and remote differ. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
   } catch (error) {
     if (isBadCredentials(error)) {
       await deactivateRemoteSync("Invalid GitHub token");
@@ -451,153 +562,222 @@ async function compareRemote(): Promise<void> {
   }
 }
 
-async function useRemote(): Promise<void> {
-  const diff = memory.pendingDiff;
-  if (!diff) throw new Error("No pending comparison");
+async function useLocal(diffId: string): Promise<void> {
+  const diff = requirePendingDiff(diffId);
+  bookmarks = await readBookmarks();
+  const local = currentSnapshot();
+  const leftHash = await snapshotHash(local);
+  if (leftHash !== diff.leftHash) {
+    memory.pendingDiff = remoteDiff(local, {
+      gistId: diff.gistId,
+      updatedAt: diff.remoteUpdatedAt,
+      snapshot: diff.right
+    }, leftHash, diff.rightHash);
+    await setStatusBestEffort({
+      phase: "conflict",
+      message: "Local data changed. Review the updated comparison.",
+      gistId: diff.gistId,
+      remoteUpdatedAt: diff.remoteUpdatedAt
+    });
+    throw new HandledOperationError("Local data changed since the comparison. Review the latest diff before overwriting remote data.");
+  }
+  await upload(true);
+}
+
+async function useRemote(diffId: string): Promise<void> {
+  const diff = requirePendingDiff(diffId);
+  if (!memory.gistId || memory.gistId !== diff.gistId) {
+    throw new HandledOperationError("The Gist connection changed. Compare local and remote data again.");
+  }
+  const client = await connectedClient();
+  const remote = await client.read(diff.gistId);
+  const remoteHash = await snapshotHash(remote.snapshot);
+  bookmarks = await readBookmarks();
+  const local = currentSnapshot();
+  const localHash = await snapshotHash(local);
+  if (remoteHash !== diff.rightHash || remote.updatedAt !== diff.remoteUpdatedAt || localHash !== diff.leftHash) {
+    memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
+    memory.gistUrl = remote.htmlUrl;
+    await setStatusBestEffort({
+      phase: "conflict",
+      message: "Local or remote data changed. Review the updated comparison.",
+      gistId: remote.gistId,
+      remoteUpdatedAt: remote.updatedAt
+    });
+    throw new HandledOperationError("The comparison is out of date. Review the latest diff before restoring.");
+  }
   await restoreSnapshot(diff.right, "manual-restore");
   bookmarks = await readBookmarks();
-  const client = await connectedClient();
-  if (!memory.gistId) throw new Error("Gist connection is missing");
-  await establishBaseline(currentSnapshot(), await client.read(memory.gistId));
+  await establishBaseline(currentSnapshot(), remote);
   memory.sync = { ...memory.sync!, message: "Restored remote snapshot" };
   await publishToast("Restored remote snapshot");
+}
+
+async function clearDiff(diffId: string): Promise<void> {
+  requirePendingDiff(diffId);
+  memory.pendingDiff = undefined;
+  await saveMemory();
+  broadcast();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function defaultSettings(): SyncedSettings {
+  return settingsFromSnapshot(snapshotFrom([], DEFAULT_SETTINGS, []));
+}
+
+function normalizeStoredSettings(raw: unknown): { settings: SyncedSettings; changed: boolean; recovered: boolean } {
+  const fallback = defaultSettings();
+  if (raw === undefined) return { settings: fallback, changed: true, recovered: false };
+  if (!isRecord(raw)) return { settings: fallback, changed: true, recovered: true };
+
+  const hasRequiredObjects = isRecord(raw.background) && isRecord(raw.foreground) && isRecord(raw.layout) && isRecord(raw.features);
+  const background: Record<string, unknown> = isRecord(raw.background)
+    ? { ...DEFAULT_SETTINGS.background, ...raw.background }
+    : { ...DEFAULT_SETTINGS.background };
+  if (background.type === "dynamic") {
+    const effect = normalizeDynamicEffect(background.effect);
+    background.effect = effect;
+    background.angle = typeof background.angle === "number" && Number.isFinite(background.angle) ? background.angle : 145;
+    background.speed = normalizeDynamicSpeed(effect, typeof background.speed === "number" ? background.speed : undefined);
+    background.parameters = normalizeDynamicParameters(effect, background.parameters);
+  }
+
+  const candidate = {
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    background,
+    foreground: isRecord(raw.foreground) ? { ...DEFAULT_SETTINGS.foreground, ...raw.foreground } : { ...DEFAULT_SETTINGS.foreground },
+    layout: isRecord(raw.layout) ? { ...DEFAULT_SETTINGS.layout, ...raw.layout } : { ...DEFAULT_SETTINGS.layout },
+    features: isRecord(raw.features) ? { ...DEFAULT_SETTINGS.features, ...raw.features } : { ...DEFAULT_SETTINGS.features }
+  };
+
+  try {
+    const validated = validateSnapshot({
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      updatedAt: eastEightTimestamp(),
+      config: candidate,
+      bookmarks: [],
+      notes: []
+    });
+    const settings = settingsFromSnapshot(validated);
+    return {
+      settings,
+      changed: JSON.stringify(raw) !== JSON.stringify(settings),
+      recovered: !hasRequiredObjects
+    };
+  } catch {
+    return { settings: fallback, changed: true, recovered: true };
+  }
 }
 
 async function initialize(): Promise<void> {
   if (initialized) return;
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   memory = (stored[STORAGE_KEY] as StoredState | undefined) ?? {};
-  memory.settings ??= DEFAULT_SETTINGS;
-  if (memory.settings.background.type === "dynamic") {
-    const normalizedEffect = normalizeDynamicEffect(memory.settings.background.effect);
-    const normalizedSpeed = normalizeDynamicSpeed(normalizedEffect, memory.settings.background.speed);
-    const normalizedParameters = normalizeDynamicParameters(normalizedEffect, memory.settings.background.parameters);
-    const migrated =
-      !isDynamicSpeedValid(normalizedEffect, memory.settings.background.speed) ||
-      !Number.isFinite(memory.settings.background.angle) ||
-      normalizedEffect !== memory.settings.background.effect ||
-      normalizedSpeed !== memory.settings.background.speed ||
-      JSON.stringify(memory.settings.background.parameters ?? {}) !== JSON.stringify(normalizedParameters);
-
-    if (migrated) {
-      memory.settings = {
-        ...memory.settings,
-        background: {
-          ...memory.settings.background,
-          effect: normalizedEffect,
-          angle: Number.isFinite(memory.settings.background.angle) ? memory.settings.background.angle : 145,
-          speed: normalizedSpeed,
-          parameters: normalizedParameters
-        }
-      };
-      await saveMemory();
-    }
-  }
-  if (memory.settings.layout.bookmarkAlignment !== "left" &&
-    memory.settings.layout.bookmarkAlignment !== "center" &&
-    memory.settings.layout.bookmarkAlignment !== "right") {
-    memory.settings = {
-      ...memory.settings,
-      layout: { ...memory.settings.layout, bookmarkAlignment: "center" }
-    };
-    await saveMemory();
-  }
-  if (memory.settings.features.hoverStyle !== "underline" &&
-    memory.settings.features.hoverStyle !== "box" &&
-    memory.settings.features.hoverStyle !== "block") {
-    memory.settings = {
-      ...memory.settings,
-      features: { ...memory.settings.features, hoverStyle: "underline" }
-    };
-    await saveMemory();
-  }
-  if (typeof memory.settings.features.hoverColor !== "string" || !/^#[0-9a-f]{6}$/i.test(memory.settings.features.hoverColor)) {
-    memory.settings = {
-      ...memory.settings,
-      features: { ...memory.settings.features, hoverColor: "#59d5b8" }
-    };
-    await saveMemory();
-  }
-  if (memory.settings.features.themeMode !== "dark" && memory.settings.features.themeMode !== "light") {
-    memory.settings = {
-      ...memory.settings,
-      features: { ...memory.settings.features, themeMode: "dark" }
-    };
-    await saveMemory();
-  }
-  const storedSearchText: unknown = memory.settings.features.searchText;
-  const normalizedSearchText = storedSearchText === true
-    ? SEARCH_TEXT_OPTIONS[1]
-    : storedSearchText === false
-      ? SEARCH_TEXT_OPTIONS[0]
-      : isSearchTextPosition(storedSearchText)
-        ? storedSearchText
-        : undefined;
-  if (typeof memory.settings.features.searchIcon !== "boolean" ||
-    !isSearchTextPosition(normalizedSearchText) ||
-    typeof memory.settings.features.bookmarkDetails !== "boolean" ||
-    typeof memory.settings.features.clockSeconds !== "boolean") {
-    memory.settings = {
-      ...memory.settings,
-      features: {
-        ...memory.settings.features,
-        searchIcon: true,
-        searchText: normalizedSearchText ?? SEARCH_TEXT_OPTIONS[1],
-        bookmarkDetails: true,
-        clockSeconds: false
-      }
-    };
-    await saveMemory();
-  }
+  let memoryChanged = false;
+  const normalizedSettings = normalizeStoredSettings(memory.settings);
+  memory.settings = normalizedSettings.settings;
+  memoryChanged ||= normalizedSettings.changed;
   openSetupOnLaunch = !memory.setupSeen;
   if (!memory.localUpdatedAt) {
     memory.localUpdatedAt = eastEightTimestamp();
-    await saveMemory();
+    memoryChanged = true;
   }
-  memory.notes = normalizeNotes(memory.notes);
+  const normalizedNotes = normalizeNotes(memory.notes);
+  if (JSON.stringify(normalizedNotes) !== JSON.stringify(memory.notes ?? [])) memoryChanged = true;
+  memory.notes = normalizedNotes;
   if (memory.toast && (!Number.isFinite(memory.toast.expiresAt) || memory.toast.expiresAt <= Date.now())) {
     memory.toast = undefined;
-    await saveMemory();
+    memoryChanged = true;
   }
   const recoveryPoints = (memory.recoveryPoints ?? []).filter((point) => {
     try { validateSnapshot(point.snapshot); return true; }
     catch { return false; }
   });
-  let invalidLocalSnapshot = recoveryPoints.length !== (memory.recoveryPoints ?? []).length;
+  if (recoveryPoints.length !== (memory.recoveryPoints ?? []).length) memoryChanged = true;
   memory.recoveryPoints = recoveryPoints;
+  if (memory.baseline && (
+    typeof memory.baseline.localHash !== "string" ||
+    typeof memory.baseline.remoteHash !== "string" ||
+    typeof memory.baseline.remoteUpdatedAt !== "string" ||
+    memory.baseline.localHash !== memory.baseline.remoteHash
+  )) {
+    memory.baseline = undefined;
+    memoryChanged = true;
+  }
   if (memory.pendingDiff) {
     try {
-      validateSnapshot(memory.pendingDiff.left);
-      validateSnapshot(memory.pendingDiff.right);
+      const candidate = memory.pendingDiff as DiffPayload;
+      const left = validateSnapshot(candidate.left);
+      const right = validateSnapshot(candidate.right);
+      const [leftHash, rightHash] = await Promise.all([snapshotHash(left), snapshotHash(right)]);
+      if (candidate.source !== "remote" || typeof candidate.gistId !== "string" || !candidate.gistId ||
+        typeof candidate.remoteUpdatedAt !== "string" || !candidate.remoteUpdatedAt ||
+        candidate.leftHash !== leftHash || candidate.rightHash !== rightHash ||
+        candidate.id !== createDiffId("remote", leftHash, rightHash, candidate.remoteUpdatedAt)) {
+        throw new Error("Invalid stored diff metadata");
+      }
+      memory.pendingDiff = { ...candidate, left, right, leftHash, rightHash };
     } catch {
       memory.pendingDiff = undefined;
-      invalidLocalSnapshot = true;
+      memoryChanged = true;
     }
   }
-  if (invalidLocalSnapshot) {
-    await saveMemory();
+
+  if (normalizedSettings.recovered) {
+    const message = "Stored settings were invalid and were reset to safe defaults";
+    memory.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 };
+    memory.baseline = undefined;
+    memory.localUpdatedAt = eastEightTimestamp();
+    memoryChanged = true;
   }
   if (!memory.token && memory.sync?.phase !== "local-only") {
     memory.sync = { phase: "local-only", message: "Local only" };
-    await saveMemory();
+    memoryChanged = true;
   }
   if (memory.token && (!memory.syncEnabled || !memory.gistId) && memory.sync?.phase !== "local-only") {
     memory.sync = { phase: "local-only", message: "Remote not configured" };
-    await saveMemory();
+    memoryChanged = true;
   }
   if (memory.token && memory.gistId && memory.sync && (
     memory.sync.phase === "uploading" || memory.sync.phase === "restoring" || memory.sync.phase === "discovering"
   )) {
     memory.sync = { phase: "discovering", message: "Checking remote…", gistId: memory.gistId };
-    await saveMemory();
+    memoryChanged = true;
   }
   bookmarks = await readBookmarks();
+  if (memory.pendingDiff) {
+    const local = currentSnapshot();
+    const leftHash = await snapshotHash(local);
+    if (leftHash !== memory.pendingDiff.leftHash) {
+      memory.pendingDiff = remoteDiff(local, {
+        gistId: memory.pendingDiff.gistId,
+        updatedAt: memory.pendingDiff.remoteUpdatedAt,
+        snapshot: memory.pendingDiff.right
+      }, leftHash, memory.pendingDiff.rightHash);
+      memory.sync = {
+        phase: "conflict",
+        message: "Local data changed. Review the updated comparison.",
+        gistId: memory.pendingDiff.gistId,
+        remoteUpdatedAt: memory.pendingDiff.remoteUpdatedAt
+      };
+      memoryChanged = true;
+    }
+  }
+  if (memoryChanged) await saveMemory();
   initialized = true;
   broadcast();
 }
 
 function ensureInitialized(): Promise<void> {
-  initializing ??= initialize();
+  if (initialized) return Promise.resolve();
+  initializing ??= initialize().catch((error) => {
+    initializing = undefined;
+    throw error;
+  });
   return initializing;
 }
 
@@ -608,6 +788,7 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
     case "SAVE_SETTINGS":
       memory.settings = request.settings;
       memory.localUpdatedAt = touchLocalUpdatedAt();
+      await refreshPendingDiffLeft();
       await saveMemory();
       broadcast();
       scheduleUpload();
@@ -619,11 +800,13 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
         updatetime: note.updatetime
       }));
       memory.localUpdatedAt = touchLocalUpdatedAt();
+      await refreshPendingDiffLeft();
       await saveMemory();
       broadcast();
       scheduleUpload();
       break;
     case "SAVE_TOKEN":
+      cancelScheduledUpload();
       memory.token = normalizeGitHubToken(request.token) || undefined;
       memory.gistId = undefined;
       memory.gistUrl = undefined;
@@ -634,12 +817,12 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
       if (memory.token) await checkRemoteOnStartup(true);
       else await setStatus({ phase: "local-only", message: "Local only" });
       break;
-    case "UPLOAD_NOW": await upload(true); break;
+    case "UPLOAD_NOW": await upload(false); break;
     case "IMPORT_BOOKMARKS": await importFromChrome(); break;
     case "COMPARE_REMOTE": await compareRemote(); break;
-    case "USE_LOCAL": await upload(true); break;
-    case "USE_REMOTE": await useRemote(); break;
-    case "CLEAR_DIFF": memory.pendingDiff = undefined; await saveMemory(); broadcast(); break;
+    case "USE_LOCAL": await useLocal(request.diffId); break;
+    case "USE_REMOTE": await useRemote(request.diffId); break;
+    case "CLEAR_DIFF": await clearDiff(request.diffId); break;
     case "OPEN_BOOKMARK_MANAGER": await chrome.tabs.create({ url: "chrome://bookmarks/" }); break;
   }
   return appState();
@@ -666,8 +849,20 @@ chrome.runtime.onMessage.addListener((request: ExtensionRequest, _sender, sendRe
     .then((state) => sendResponse({ ok: true, state }))
     .catch(async (error) => {
       const message = errorMessage(error);
-      await setStatus({ phase: "error", message, gistId: memory.gistId });
-      sendResponse({ ok: false, state: appState(), error: message });
+      try {
+        if (!(error instanceof HandledOperationError)) {
+          if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
+          else await setStatusBestEffort({ phase: "error", message, gistId: memory.gistId });
+        }
+      } catch {
+        memory.sync = { phase: "error", message, gistId: memory.gistId };
+      } finally {
+        try {
+          sendResponse({ ok: false, state: appState(), error: message });
+        } catch (responseError) {
+          sendResponse({ ok: false, error: `${message}; ${errorMessage(responseError)}` });
+        }
+      }
     });
   return true;
 });
@@ -678,10 +873,18 @@ const onBookmarksChanged = () => {
     await ensureInitialized();
     bookmarks = await readBookmarks();
     memory.localUpdatedAt = touchLocalUpdatedAt();
+    await refreshPendingDiffLeft();
     await saveMemory();
     broadcast();
     scheduleUpload();
-  }).catch(() => undefined);
+  }).catch(async (error) => {
+    try {
+      if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
+      else await setStatusBestEffort({ phase: "error", message: `Bookmark change was not saved: ${errorMessage(error)}`, gistId: memory.gistId });
+    } catch {
+      memory.sync = { phase: "error", message: `Bookmark change was not saved: ${errorMessage(error)}`, gistId: memory.gistId };
+    }
+  });
 };
 
 chrome.bookmarks.onCreated.addListener(onBookmarksChanged);

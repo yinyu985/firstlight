@@ -10,6 +10,7 @@ import {
 } from "./backgrounds/DotGrid";
 import { resolveLiquidChromeSettings } from "./backgrounds/LiquidChrome";
 import { resolveTopographySettings } from "./backgrounds/Topography";
+import { resolveWebThreadsSettings } from "./backgrounds/WebThreads";
 
 describe("Dynamic background", () => {
   it("maps the complete speed range monotonically and gives the fast end real range", () => {
@@ -85,6 +86,32 @@ describe("Dynamic background", () => {
   it("caps Liquid Chrome amplitude at the product limit", () => {
     expect(resolveLiquidChromeSettings({ parameters: { amplitude: 2 } }).amplitude).toBe(0.3);
     expect(resolveLiquidChromeSettings({ parameters: {} }).amplitude).toBe(0.2);
+  });
+
+  it("keeps each Threads appearance control on its own renderer setting", () => {
+    const settings = resolveWebThreadsSettings({
+      parameters: {
+        color3: "#123456",
+        glow: 0.011,
+        falloff: 0.73,
+        thickness: 2.15,
+        brightness: 1.35,
+        opacity: 0.42,
+        mouseInteraction: true,
+        mouseStrength: 0.85
+      }
+    });
+
+    expect(settings).toMatchObject({
+      glow: 0.011,
+      falloff: 0.73,
+      thickness: 2.15,
+      brightness: 1.35,
+      opacity: 0.42,
+      mouseInteraction: true,
+      mouseStrength: 0.85
+    });
+    expect(settings.colors.color3).toEqual([0x12 / 255, 0x34 / 255, 0x56 / 255]);
   });
 
   it("uses the visible Balatro speed control as the shader spin speed", () => {

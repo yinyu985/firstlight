@@ -50,12 +50,16 @@ export function snapshotHash(snapshot: Snapshot): Promise<string> {
   return sha256(stableStringify(semanticSnapshot(snapshot)));
 }
 
+export function serializeSnapshot(snapshot: Snapshot): string {
+  return JSON.stringify(canonicalSnapshot(snapshot), null, 2);
+}
+
 export function snapshotBytes(snapshot: Snapshot): number {
-  return encoder.encode(JSON.stringify(canonicalSnapshot(snapshot))).byteLength;
+  return encoder.encode(serializeSnapshot(snapshot)).byteLength;
 }
 
 export async function prettySnapshot(snapshot: Snapshot): Promise<string> {
-  return JSON.stringify(await projectSnapshotForDiff(snapshot), null, 2);
+  return serializeSnapshot(await projectSnapshotForDiff(snapshot));
 }
 
 export async function projectSnapshotForDiff(snapshot: Snapshot): Promise<Snapshot> {
@@ -63,11 +67,13 @@ export async function projectSnapshotForDiff(snapshot: Snapshot): Promise<Snapsh
     if (node.url === undefined) return { title: node.title, children: await project(node.children ?? []) };
     if (encoder.encode(node.url).byteLength <= 4096) return { title: node.title, url: node.url };
     const bytes = encoder.encode(node.url).byteLength;
-    const protocol = node.url.match(/^([a-z][a-z0-9+.-]*:)/i)?.[1] ?? "unknown:";
+    const protocolMatch = node.url.match(/^([a-z][a-z0-9+.-]*:)/i)?.[1];
+    const protocol = protocolMatch ?? "unknown:";
+    const contentStart = protocolMatch?.length ?? 0;
     const hash = await sha256(node.url);
     return {
       title: node.title,
-      url: `${protocol}${node.url.slice(protocol.length, protocol.length + 256)}… [${bytes} bytes; SHA-256 ${hash}]`
+      url: `${protocol}${node.url.slice(contentStart, contentStart + 256)}… [${bytes} bytes; SHA-256 ${hash}]`
     };
   }));
   return canonicalSnapshot({ ...snapshot, bookmarks: await project(snapshot.bookmarks) });
@@ -112,7 +118,8 @@ export function validateSnapshot(input: unknown): Snapshot {
     throw new SnapshotValidationError("Invalid gradient settings");
   }
   if ((background.type === "gradient" || background.type === "dynamic") && (
-    typeof background.angle !== "number" || background.angle < 0 || background.angle > 360
+    typeof background.angle !== "number" || !Number.isFinite(background.angle) ||
+    background.angle < 0 || background.angle > 360
   )) throw new SnapshotValidationError("Invalid gradient settings");
   if (background.type === "dynamic") {
     if (background.effect !== undefined && !isDynamicEffectInput(background.effect)) {
@@ -216,7 +223,8 @@ export function validateSnapshot(input: unknown): Snapshot {
   };
 
   const parseNotes = (value: unknown): SyncNote[] => {
-    if (!Array.isArray(value)) return [];
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new SnapshotValidationError("Invalid notes list");
     const ids = new Set<string>();
     return value.map((item, index) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -330,10 +338,12 @@ export function parseSnapshot(text: string): Snapshot {
   if (encoder.encode(text).byteLength > MAX_SNAPSHOT_BYTES) {
     throw new SnapshotValidationError("firstlight.json exceeds the 10 MiB GitHub Gist limit");
   }
+  let input: unknown;
   try {
-    return validateSnapshot(JSON.parse(text));
+    input = JSON.parse(text);
   } catch (error) {
-    if (error instanceof SnapshotValidationError) throw error;
+    if (!(error instanceof SyntaxError)) throw error;
     throw new SnapshotValidationError("firstlight.json is not valid JSON");
   }
+  return validateSnapshot(input);
 }

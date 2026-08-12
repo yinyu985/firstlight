@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useRef } from "react";
+import { boundedCanvasSize } from "./canvasSizing";
+import { bindWindowPointer } from "./pointerTracking";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -178,7 +180,7 @@ function deriveColors(from: Color, to: Color): { color1: Color; color2: Color; c
   return { color1, color2, color3 };
 }
 
-function resolveSettings(props: WebThreadsProps): WebThreadsSettings {
+export function resolveWebThreadsSettings(props: WebThreadsProps): WebThreadsSettings {
   const params = props.parameters ?? {};
   const rawSpeed = getNumber(
     getNumber(props.speed, getNumber(params.speed, WEBTHREADS_DEFAULTS.speed)),
@@ -188,6 +190,10 @@ function resolveSettings(props: WebThreadsProps): WebThreadsSettings {
   const speed = mapSharedSpeed(rawSpeed, WEBTHREADS_DEFAULTS.speed, WEBTHREADS_RANGES.speed.max);
   const from = parseColor(props.from, WEBTHREADS_DEFAULTS.from);
   const to = parseColor(props.to, WEBTHREADS_DEFAULTS.to);
+
+  const colors = deriveColors(from, to);
+  const explicitColor3 = getString(params.color3);
+  if (explicitColor3) colors.color3 = parseColor(explicitColor3, "#ffffff");
 
   return {
     speed,
@@ -259,7 +265,7 @@ function resolveSettings(props: WebThreadsProps): WebThreadsSettings {
       WEBTHREADS_RANGES.mouseStrength.min,
       WEBTHREADS_RANGES.mouseStrength.max
     ),
-    colors: deriveColors(from, to)
+    colors
   };
 }
 
@@ -344,8 +350,18 @@ uniform float uMouseActive;
 #define TAU 6.28318530718
 #define MAX_THREADS 10
 
-float glow(float x, float str, float dist) {
-  return dist / pow(max(x, 1e-4), str);
+float lineCore(float distanceToLine, float halfWidth, float antialias) {
+  return 1.0 - smoothstep(
+    max(0.0, halfWidth - antialias),
+    halfWidth + antialias,
+    distanceToLine
+  );
+}
+
+float lineHalo(float distanceToLine, float halfWidth, float radius, float softness, float antialias) {
+  if (radius <= antialias * 0.5) return 0.0;
+  float halo = 1.0 - smoothstep(halfWidth, halfWidth + radius + antialias, distanceToLine);
+  return pow(max(halo, 0.0), 1.0 / max(softness, 0.05));
 }
 
 void main() {
@@ -353,8 +369,11 @@ void main() {
   float n = max(uThreadCount, 1.0);
 
   float pinchX = uFanMode < 0.5 ? 0.5 : (uFanMode < 1.5 ? 0.0 : 1.0);
+  float anchorY = uPosition;
   if (uEnableMouse > 0.5) {
-    pinchX = mix(pinchX, uMouse.x, clamp(uMouseStrength, 0.0, 1.0) * uMouseActive);
+    float mouseMix = clamp(uMouseStrength, 0.0, 1.0) * uMouseActive;
+    pinchX = mix(pinchX, uMouse.x, mouseMix);
+    anchorY = mix(anchorY, uMouse.y, mouseMix * 0.65);
   }
 
   float spreadDx = uSpread * abs(uv.x - pinchX);
@@ -363,13 +382,15 @@ void main() {
   float mirror = uMirror > 0.5 ? sign(pinchX - uv.x) : 1.0;
   bool doShimmer = uShimmer > 0.5;
   float shimmerT = iTime * 1.7;
-  float invThickness = 1.0 / max(uThickness, 0.01);
+  float antialias = max(1.25 / iResolution.y, 0.00035);
+  float halfWidth = max(0.00035, uThickness * 0.0018);
   float xFreq = uv.x * uFrequency;
-  float yOff = uv.y - uPosition;
+  float yOff = uv.y - anchorY;
   float ciScale = n > 1.0 ? 1.0 / (n - 1.0) : 0.0;
 
   vec3 col = vec3(0.0);
-  float gsum = 0.0;
+  float coverageSum = 0.0;
+  float coreSum = 0.0;
 
   for (int idx = 0; idx < MAX_THREADS; idx++) {
     float i = float(idx);
@@ -379,37 +400,38 @@ void main() {
     float shimmer = doShimmer ? sin(shimmerT + i * 1.3) * 0.35 : 0.0;
     float phase = (baseT + i * tauOverN) * mirror + shimmer;
 
-    float sdf = abs(yOff + sin(xFreq + phase) * amplitude) * invThickness;
-
-    float g = glow(sdf, uFalloff, uGlow);
+    float distanceToLine = abs(yOff + sin(xFreq + phase) * amplitude);
+    float core = lineCore(distanceToLine, halfWidth, antialias);
+    float halo = lineHalo(distanceToLine, halfWidth, uGlow, uFalloff, antialias);
+    float coverage = core + halo * 0.55;
     float ci = i * ciScale;
     vec3 threadCol = mix(uColor1, uColor2, ci);
 
-    col += g * threadCol;
-    gsum += g;
+    col += coverage * threadCol;
+    coverageSum += coverage;
+    coreSum += core;
   }
 
-  float coreAmt = smoothstep(0.5, 2.2, gsum);
-  col = mix(col, uColor3 * gsum, coreAmt * 0.5);
+  vec3 threadColor = col / max(coverageSum, 0.0001);
+  float coreAmt = smoothstep(0.15, 1.4, coreSum);
+  threadColor = mix(threadColor, uColor3, coreAmt * 0.45);
 
   float bright = uBrightness;
   if (uEnableMouse > 0.5) {
     vec2 md = uv - uMouse;
     float d2 = dot(md, md);
-    bright += clamp(uMouseStrength, 0.0, 1.0) * uMouseActive * exp(-d2 * 6.0) * 0.6;
+    bright += clamp(uMouseStrength, 0.0, 1.0) * uMouseActive * exp(-d2 * 8.0) * 0.12;
   }
-  col *= bright;
+  threadColor *= bright;
 
-  float alpha = clamp(gsum, 0.0, 1.0) * uOpacity;
-  vec3 outRgb = col * alpha;
+  float alpha = clamp(coverageSum, 0.0, 1.0) * uOpacity;
 
   if (uGrain > 0.5) {
     float gv = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)) + iTime) * 43758.5453) - 0.5) * uGrainIntensity;
-    outRgb = clamp(outRgb + gv, 0.0, 1.0);
-    alpha = clamp(alpha + gv, 0.0, 1.0);
+    threadColor += gv;
   }
 
-  gl_FragColor = vec4(outRgb, alpha);
+  gl_FragColor = vec4(clamp(threadColor, 0.0, 1.0) * alpha, alpha);
 }
 `;
 
@@ -460,7 +482,7 @@ export function WebThreads({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const settings = resolveSettings({ from, to, speed, parameters });
+    const settings = resolveWebThreadsSettings({ from, to, speed, parameters });
     settingsRef.current = settings;
 
     const gl = canvas.getContext("webgl", {
@@ -474,6 +496,7 @@ export function WebThreads({
 
     let disposed = false;
     let program: WebGLProgram | null = null;
+    let buffer: WebGLBuffer | null = null;
 
     try {
       program = createProgram(gl);
@@ -484,7 +507,7 @@ export function WebThreads({
         -1, 1,
         1, 1
       ]);
-      const buffer = gl.createBuffer();
+      buffer = gl.createBuffer();
       if (!buffer) {
         throw new Error("Unable to create WebGL buffer");
       }
@@ -531,9 +554,7 @@ export function WebThreads({
       gl.useProgram(program);
       const resize = () => {
         const rect = canvas.getBoundingClientRect();
-        const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-        const width = Math.max(1, Math.floor(rect.width * dpr));
-        const height = Math.max(1, Math.floor(rect.height * dpr));
+        const { width, height } = boundedCanvasSize(rect.width, rect.height);
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
           canvas.height = height;
@@ -549,24 +570,14 @@ export function WebThreads({
       ro.observe(canvas);
       resize();
 
-      const onPointerMove = (event: PointerEvent) => {
+      const unbindPointer = bindWindowPointer(canvas, (pointer) => {
         if (!settingsRef.current?.mouseInteraction) return;
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        targetMouse.current[0] = (event.clientX - rect.left) / rect.width;
-        targetMouse.current[1] = 1 - (event.clientY - rect.top) / rect.height;
-        targetActive.current = 1;
-      };
-      const onMouseEnter = () => {
-        targetActive.current = 1;
-      };
-      const onMouseLeave = () => {
-        targetActive.current = 0;
-      };
-
-      canvas.addEventListener("pointermove", onPointerMove);
-      canvas.addEventListener("mouseenter", onMouseEnter);
-      canvas.addEventListener("mouseleave", onMouseLeave);
+        targetMouse.current[0] = pointer.x;
+        targetMouse.current[1] = pointer.y;
+      }, (isActive) => {
+        targetActive.current = isActive && Boolean(settingsRef.current?.mouseInteraction) ? 1 : 0;
+      });
+      canvas.style.pointerEvents = "none";
 
       updateUniforms(settings, gl, uniforms);
 
@@ -603,9 +614,7 @@ export function WebThreads({
           cancelAnimationFrame(animationRef.current);
           animationRef.current = 0;
         }
-        canvas.removeEventListener("pointermove", onPointerMove);
-        canvas.removeEventListener("mouseenter", onMouseEnter);
-        canvas.removeEventListener("mouseleave", onMouseLeave);
+        unbindPointer();
         ro.disconnect();
         if (buffer) {
           gl.deleteBuffer(buffer);
@@ -623,6 +632,10 @@ export function WebThreads({
         gl.deleteProgram(program);
         programRef.current = null;
       }
+      if (buffer) {
+        gl.deleteBuffer(buffer);
+        bufferRef.current = null;
+      }
       glRef.current = null;
       return;
     }
@@ -630,14 +643,13 @@ export function WebThreads({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const settings = resolveSettings({ from, to, speed, parameters });
+    const settings = resolveWebThreadsSettings({ from, to, speed, parameters });
     settingsRef.current = settings;
 
     if (!canvas || !glRef.current || !programRef.current || !uniformRef.current) return;
 
-    if (canvas.style) {
-      canvas.style.pointerEvents = settings.mouseInteraction ? "auto" : "none";
-    }
+    canvas.style.pointerEvents = "none";
+    if (!settings.mouseInteraction) targetActive.current = 0;
 
     const gl = glRef.current;
     const uniforms = uniformRef.current;

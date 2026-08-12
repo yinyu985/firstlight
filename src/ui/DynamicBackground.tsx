@@ -222,7 +222,9 @@ float snowLayer(
   float layer
 ) {
   vec2 grid = point * scale;
-  float time = u_time * fallSpeed;
+  // Every layer advances from the same speed-controlled clock. Layer speed is
+  // applied once so changing the shared speed scales every flake consistently.
+  float time = u_time;
   grid.x += time * wind;
   grid.x += sin(point.y * 1.7 + time * 0.55 + layer * 2.3) * (0.18 + abs(wind) * 0.45);
   grid.y += time * fallSpeed;

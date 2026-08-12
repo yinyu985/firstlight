@@ -17,8 +17,12 @@ export function ExtensionApp() {
   const pendingSettings = useRef<SyncedSettings | undefined>(undefined);
   const pendingNotes = useRef<SyncNote[] | undefined>(undefined);
   const notesGeneration = useRef(0);
+  const settingsGeneration = useRef(0);
   const settingsTimer = useRef<number | undefined>(undefined);
   const settingsRetryTimer = useRef<number | undefined>(undefined);
+  const settingsQueue = useRef<Promise<void>>(Promise.resolve());
+  const settingsJobs = useRef(new WeakMap<SyncedSettings, Promise<void>>());
+  const submitPendingSettingsRef = useRef<() => Promise<void>>(async () => undefined);
 
   const withOptimisticState = useCallback((next: AppState): AppState => ({
     ...next,
@@ -61,27 +65,87 @@ export function ExtensionApp() {
     }
   }, [withOptimisticState]);
 
+  const submitPendingSettings = useCallback((): Promise<void> => {
+    const submitted = pendingSettings.current;
+    if (!submitted) return Promise.resolve();
+    const existing = settingsJobs.current.get(submitted);
+    if (existing) return existing;
+
+    const generation = settingsGeneration.current;
+    const task = settingsQueue.current.then(async () => {
+      if (generation !== settingsGeneration.current) return;
+      const next = await request({ type: "SAVE_SETTINGS", settings: submitted });
+      if (generation !== settingsGeneration.current) return;
+      if (pendingSettings.current === submitted) pendingSettings.current = undefined;
+      setError(undefined);
+      setState(withOptimisticState(next));
+    });
+    const handled = task.catch((cause) => {
+      if (generation === settingsGeneration.current) {
+        setError(cause instanceof Error ? cause.message : "Unable to save settings");
+        if (pendingSettings.current === submitted && settingsRetryTimer.current === undefined) {
+          settingsRetryTimer.current = window.setTimeout(() => {
+            settingsRetryTimer.current = undefined;
+            void submitPendingSettingsRef.current().catch(() => undefined);
+          }, 1_000);
+        }
+      }
+      throw cause;
+    });
+    settingsQueue.current = handled.catch(() => undefined);
+    settingsJobs.current.set(submitted, handled);
+    void handled.then(
+      () => settingsJobs.current.delete(submitted),
+      () => settingsJobs.current.delete(submitted)
+    );
+    return handled;
+  }, [withOptimisticState]);
+  submitPendingSettingsRef.current = submitPendingSettings;
+
+  const flushPendingSettings = useCallback(async () => {
+    if (settingsTimer.current !== undefined) {
+      window.clearTimeout(settingsTimer.current);
+      settingsTimer.current = undefined;
+    }
+    if (settingsRetryTimer.current !== undefined) {
+      window.clearTimeout(settingsRetryTimer.current);
+      settingsRetryTimer.current = undefined;
+    }
+    const generation = settingsGeneration.current;
+    while (pendingSettings.current && generation === settingsGeneration.current) {
+      await submitPendingSettingsRef.current();
+    }
+    await settingsQueue.current;
+  }, []);
+
+  const cancelPendingSettings = useCallback(() => {
+    settingsGeneration.current += 1;
+    if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
+    if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
+    settingsTimer.current = undefined;
+    settingsRetryTimer.current = undefined;
+    pendingSettings.current = undefined;
+  }, []);
+
+  const actAfterSettings = useCallback(async (message: ExtensionRequest) => {
+    try {
+      await flushPendingSettings();
+    } catch {
+      return false;
+    }
+    return act(message);
+  }, [act, flushPendingSettings]);
+
   const saveSettings = useCallback((settings: SyncedSettings) => {
     pendingSettings.current = settings;
     setState((current) => current ? { ...current, settings } : current);
     if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
     if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
-    const submitPendingSettings = () => {
-      const submitted = pendingSettings.current;
-      if (!submitted) return;
-      void request({ type: "SAVE_SETTINGS", settings: submitted }).then((next) => {
-        if (pendingSettings.current === submitted) pendingSettings.current = undefined;
-        setError(undefined);
-        setState(withOptimisticState(next));
-      }).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Unable to save settings");
-        if (pendingSettings.current === submitted) {
-          settingsRetryTimer.current = window.setTimeout(submitPendingSettings, 1_000);
-        }
-      });
-    };
-    settingsTimer.current = window.setTimeout(submitPendingSettings, 120);
-  }, [withOptimisticState]);
+    settingsTimer.current = window.setTimeout(() => {
+      settingsTimer.current = undefined;
+      void submitPendingSettingsRef.current().catch(() => undefined);
+    }, 120);
+  }, []);
 
   const saveNotes = useCallback(async (notes: SyncNote[]) => {
     const generation = notesGeneration.current;
@@ -115,15 +179,18 @@ export function ExtensionApp() {
     onSaveSettings={saveSettings}
     onImportBookmarks={() => void act({ type: "IMPORT_BOOKMARKS" })}
     onSaveToken={(token) => void act({ type: "SAVE_TOKEN", token })}
-    onUpload={() => void act({ type: "UPLOAD_NOW" })}
-    onCompareRemote={() => void act({ type: "COMPARE_REMOTE" })}
-    onUseLocal={() => void act({ type: "USE_LOCAL" })}
-    onUseRemote={async () => {
+    onUpload={() => void actAfterSettings({ type: "UPLOAD_NOW" })}
+    onCompareRemote={() => void actAfterSettings({ type: "COMPARE_REMOTE" })}
+    onUseLocal={async (diffId) => {
+      if (!await actAfterSettings({ type: "USE_LOCAL", diffId })) throw new Error("Unable to upload the local snapshot");
+    }}
+    onUseRemote={async (diffId) => {
+      cancelPendingSettings();
       notesGeneration.current += 1;
       pendingNotes.current = undefined;
-      if (!await act({ type: "USE_REMOTE" })) throw new Error("Unable to restore the remote snapshot");
+      if (!await act({ type: "USE_REMOTE", diffId })) throw new Error("Unable to restore the remote snapshot");
     }}
-    onCloseDiff={() => void act({ type: "CLEAR_DIFF" })}
+    onCloseDiff={(diffId) => void act({ type: "CLEAR_DIFF", diffId })}
     onOpenBookmarkManager={() => void act({ type: "OPEN_BOOKMARK_MANAGER" })}
     onSaveNotes={saveNotes}
   />;
