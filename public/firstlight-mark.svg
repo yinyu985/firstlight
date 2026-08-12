@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Firstlight</title>
+  <desc id="desc">A rising sun sending dawn rays above a horizon</desc>
+  <rect width="128" height="128" rx="28" fill="#070B12"/>
+  <path d="M23 90h82" stroke="#59D5B8" stroke-width="4"/>
+  <g fill="#B8F3DF">
+    <path d="M59 47h10L64 19 59 47Z" transform="rotate(-60 64 68)"/>
+    <path d="M59 47h10L64 19 59 47Z" transform="rotate(-30 64 68)"/>
+    <path d="M59 47h10L64 19 59 47Z" fill="#F4C98B"/>
+    <path d="M59 47h10L64 19 59 47Z" transform="rotate(30 64 68)"/>
+    <path d="M59 47h10L64 19 59 47Z" transform="rotate(60 64 68)"/>
+  </g>
+  <path d="M40 90a24 24 0 0 1 48 0H40Z" fill="#F4C98B"/>
+  <path d="M46 90a18 18 0 0 1 36 0H46Z" fill="#FFDDA5"/>
+</svg>

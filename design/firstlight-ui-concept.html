@@ -1,0 +1,2512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Firstlight Ui Concept</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Firstlight Ui Concept" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Firstlight Ui Concept&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;firstlight-product-mockup&quot;&gt;
+  &lt;style&gt;
+    #firstlight-product-mockup {
+      color-scheme: light dark;
+      width: 100%;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;
+      color: light-dark(#182027, #eef3f5);
+    }
+
+    #firstlight-product-mockup * {
+      box-sizing: border-box;
+    }
+
+    #firstlight-product-mockup button,
+    #firstlight-product-mockup input {
+      font: inherit;
+    }
+
+    #firstlight-product-mockup .firstlight-window {
+      position: relative;
+      min-height: 720px;
+      overflow: hidden;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.14), rgba(255, 255, 255, 0.12));
+      border-radius: 20px;
+      background: linear-gradient(135deg, light-dark(#f7f2eb, #15191e) 0%, light-dark(#e9eee8, #202a2d) 50%, light-dark(#dbe8e9, #26383e) 100%);
+      box-shadow: 0 22px 70px light-dark(rgba(37, 54, 59, 0.14), rgba(0, 0, 0, 0.32));
+      transition: background 220ms ease;
+    }
+
+    #firstlight-product-mockup .firstlight-window[data-background=&quot;solid&quot;] {
+      background: light-dark(#e9eee8, #202a2d);
+    }
+
+    #firstlight-product-mockup .firstlight-topbar {
+      position: absolute;
+      inset: 20px 22px auto 22px;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      pointer-events: none;
+    }
+
+    #firstlight-product-mockup .sync-status {
+      pointer-events: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.12), rgba(255, 255, 255, 0.12));
+      border-radius: 10px;
+      color: light-dark(#46545b, #cbd5d9);
+      background: light-dark(rgba(255, 255, 255, 0.46), rgba(18, 23, 27, 0.5));
+      backdrop-filter: blur(16px);
+    }
+
+    #firstlight-product-mockup .sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: light-dark(#388b6b, #5fc89c);
+    }
+
+    #firstlight-product-mockup .firstlight-content {
+      min-height: 720px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 78px 28px 92px;
+    }
+
+    #firstlight-product-mockup .clock {
+      margin: 0 0 28px;
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(3.6rem, 10vw, 6.1rem);
+      line-height: 0.9;
+      font-weight: 400;
+      letter-spacing: -0.075em;
+      color: light-dark(#17242a, #f2f6f7);
+      text-shadow: 0 4px 22px light-dark(rgba(255, 255, 255, 0.34), rgba(0, 0, 0, 0.18));
+    }
+
+    #firstlight-product-mockup .search-wrap {
+      position: relative;
+      width: min(470px, 100%);
+      margin-bottom: 26px;
+      z-index: 6;
+    }
+
+    #firstlight-product-mockup .search-icon {
+      position: absolute;
+      left: 15px;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      transform: translateY(-50%);
+      color: light-dark(#738087, #aab5b9);
+      pointer-events: none;
+    }
+
+    #firstlight-product-mockup .search-input {
+      width: 100%;
+      min-height: 48px;
+      padding: 0 44px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.13), rgba(255, 255, 255, 0.13));
+      border-radius: 14px;
+      outline: none;
+      color: light-dark(#19252b, #edf3f5);
+      background: light-dark(rgba(255, 255, 255, 0.62), rgba(18, 23, 27, 0.62));
+      box-shadow: 0 12px 34px light-dark(rgba(45, 62, 66, 0.1), rgba(0, 0, 0, 0.2));
+      backdrop-filter: blur(20px);
+    }
+
+    #firstlight-product-mockup .search-input:focus {
+      border-color: light-dark(#678e91, #72aeb1);
+      box-shadow: 0 0 0 3px light-dark(rgba(91, 137, 140, 0.16), rgba(95, 172, 176, 0.18));
+    }
+
+    #firstlight-product-mockup .search-results {
+      position: absolute;
+      inset: 56px 0 auto 0;
+      display: none;
+      padding: 8px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.13), rgba(255, 255, 255, 0.13));
+      border-radius: 14px;
+      background: light-dark(rgba(252, 253, 251, 0.96), rgba(22, 28, 32, 0.97));
+      box-shadow: 0 18px 44px light-dark(rgba(39, 51, 55, 0.17), rgba(0, 0, 0, 0.34));
+    }
+
+    #firstlight-product-mockup .search-results.open {
+      display: grid;
+      gap: 3px;
+    }
+
+    #firstlight-product-mockup .search-result {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      width: 100%;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 9px;
+      text-align: left;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .search-result:hover,
+    #firstlight-product-mockup .search-result:focus-visible {
+      background: light-dark(#e8eeea, #2b3539);
+    }
+
+    #firstlight-product-mockup .result-letter {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: light-dark(#dde7e2, #334247);
+      color: light-dark(#365960, #b9d6d8);
+    }
+
+    #firstlight-product-mockup .result-title,
+    #firstlight-product-mockup .result-path {
+      display: block;
+    }
+
+    #firstlight-product-mockup .result-title {
+      margin-bottom: 2px;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .result-path {
+      color: light-dark(#69767c, #a9b4b8);
+      font-size: 0.78rem;
+    }
+
+    #firstlight-product-mockup .bookmark-grid {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(88px, 112px));
+      gap: 12px;
+      justify-content: center;
+    }
+
+    #firstlight-product-mockup .bookmark-tile {
+      position: relative;
+      min-height: 92px;
+      padding: 12px 8px 10px;
+      border: 1px solid transparent;
+      border-radius: 14px;
+      color: light-dark(#26343a, #e6edef);
+      background: transparent;
+      cursor: pointer;
+      transition: transform 130ms ease, background 130ms ease, border-color 130ms ease;
+    }
+
+    #firstlight-product-mockup .bookmark-tile:hover,
+    #firstlight-product-mockup .bookmark-tile:focus-visible,
+    #firstlight-product-mockup .bookmark-tile.active {
+      transform: translateY(-2px);
+      border-color: light-dark(rgba(42, 54, 61, 0.1), rgba(255, 255, 255, 0.11));
+      background: light-dark(rgba(255, 255, 255, 0.4), rgba(21, 27, 30, 0.4));
+    }
+
+    #firstlight-product-mockup .bookmark-symbol {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      margin: 0 auto 8px;
+      border: 1px solid light-dark(rgba(44, 67, 72, 0.09), rgba(255, 255, 255, 0.08));
+      border-radius: 13px;
+      color: light-dark(#385b61, #bcd6d8);
+      background: light-dark(rgba(234, 241, 237, 0.78), rgba(44, 57, 62, 0.8));
+      box-shadow: 0 8px 18px light-dark(rgba(45, 62, 66, 0.08), rgba(0, 0, 0, 0.18));
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .bookmark-symbol.folder {
+      color: light-dark(#7b623b, #ddc48f);
+      background: light-dark(rgba(244, 232, 202, 0.82), rgba(70, 60, 41, 0.86));
+    }
+
+    #firstlight-product-mockup .bookmark-name {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.85rem;
+    }
+
+    #firstlight-product-mockup .cascade {
+      position: absolute;
+      z-index: 12;
+      display: none;
+      width: 224px;
+      padding: 6px;
+      border: 1px solid light-dark(rgba(38, 50, 55, 0.15), rgba(255, 255, 255, 0.13));
+      border-radius: 10px;
+      background: light-dark(rgba(250, 251, 249, 0.98), rgba(25, 30, 34, 0.98));
+      box-shadow: 0 18px 50px light-dark(rgba(34, 48, 52, 0.2), rgba(0, 0, 0, 0.42));
+    }
+
+    #firstlight-product-mockup .cascade.open {
+      display: block;
+    }
+
+    #firstlight-product-mockup .cascade-primary {
+      top: calc(50% + 112px);
+      left: calc(50% - 229px);
+    }
+
+    #firstlight-product-mockup .cascade-secondary {
+      top: 74px;
+      left: calc(100% + 7px);
+    }
+
+    #firstlight-product-mockup .cascade-item {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 36px;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      text-align: left;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .cascade-item:hover,
+    #firstlight-product-mockup .cascade-item:focus-visible,
+    #firstlight-product-mockup .cascade-item.active {
+      color: light-dark(#173c43, #eff9fa);
+      background: light-dark(#dfeae6, #36484d);
+    }
+
+    #firstlight-product-mockup .cascade-glyph {
+      color: light-dark(#708087, #a6b3b7);
+      text-align: center;
+    }
+
+    #firstlight-product-mockup .cascade-arrow {
+      color: light-dark(#76848a, #9ca9ad);
+    }
+
+    #firstlight-product-mockup .settings-trigger {
+      position: absolute;
+      right: 22px;
+      bottom: 20px;
+      z-index: 13;
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.11));
+      border-radius: 12px;
+      color: light-dark(#596970, #b8c5c9);
+      background: light-dark(rgba(255, 255, 255, 0.42), rgba(19, 24, 28, 0.48));
+      backdrop-filter: blur(16px);
+      opacity: 0.52;
+      cursor: pointer;
+      transition: opacity 130ms ease, transform 130ms ease;
+    }
+
+    #firstlight-product-mockup .settings-trigger:hover,
+    #firstlight-product-mockup .settings-trigger:focus-visible,
+    #firstlight-product-mockup .settings-trigger.active {
+      opacity: 1;
+      transform: rotate(12deg);
+    }
+
+    #firstlight-product-mockup .drawer-scrim {
+      position: absolute;
+      inset: 0;
+      z-index: 18;
+      display: none;
+      border: 0;
+      background: rgba(7, 11, 13, 0.25);
+      backdrop-filter: blur(2px);
+      cursor: default;
+    }
+
+    #firstlight-product-mockup .drawer-scrim.open {
+      display: block;
+    }
+
+    #firstlight-product-mockup .settings-drawer {
+      position: absolute;
+      inset: 0 0 0 auto;
+      z-index: 19;
+      width: min(440px, 94%);
+      padding: 22px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      transform: translateX(102%);
+      border-left: 1px solid light-dark(rgba(37, 50, 55, 0.13), rgba(255, 255, 255, 0.12));
+      background: light-dark(rgba(248, 250, 247, 0.985), rgba(22, 27, 31, 0.985));
+      box-shadow: -18px 0 60px light-dark(rgba(34, 47, 51, 0.16), rgba(0, 0, 0, 0.35));
+      transition: transform 190ms ease;
+    }
+
+    #firstlight-product-mockup .settings-drawer.open {
+      transform: translateX(0);
+    }
+
+    #firstlight-product-mockup .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    #firstlight-product-mockup .drawer-title {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .icon-button {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 9px;
+      color: light-dark(#536169, #b8c4c8);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .icon-button:hover,
+    #firstlight-product-mockup .icon-button:focus-visible {
+      background: light-dark(#e7ece9, #30383c);
+    }
+
+    #firstlight-product-mockup .setting-section {
+      padding: 16px 0;
+      border-top: 1px solid light-dark(rgba(42, 54, 61, 0.1), rgba(255, 255, 255, 0.1));
+    }
+
+    #firstlight-product-mockup .setting-section:first-of-type {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    #firstlight-product-mockup .setting-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    #firstlight-product-mockup .setting-label {
+      font-size: 0.86rem;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .setting-help {
+      color: light-dark(#718087, #9eacb1);
+      font-size: 0.76rem;
+    }
+
+    #firstlight-product-mockup .segmented {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      padding: 3px;
+      border-radius: 10px;
+      background: light-dark(#e6ebe8, #2c3438);
+    }
+
+    #firstlight-product-mockup .segmented button {
+      min-height: 34px;
+      border: 0;
+      border-radius: 8px;
+      color: light-dark(#68767d, #aab6ba);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .segmented button[aria-pressed=&quot;true&quot;] {
+      color: light-dark(#18262c, #f0f4f5);
+      background: light-dark(#ffffff, #3a4549);
+      box-shadow: 0 2px 8px light-dark(rgba(33, 47, 52, 0.1), rgba(0, 0, 0, 0.22));
+    }
+
+    #firstlight-product-mockup .background-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #firstlight-product-mockup .background-choice {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 7px 9px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.12), rgba(255, 255, 255, 0.11));
+      border-radius: 10px;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .background-choice[aria-pressed=&quot;true&quot;] {
+      border-color: light-dark(#6b9497, #6ba7aa);
+      background: light-dark(#eef4f0, #2c3b3f);
+    }
+
+    #firstlight-product-mockup .background-swatch {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: light-dark(#dfe9e5, #26373b);
+    }
+
+    #firstlight-product-mockup .background-swatch.gradient {
+      background: linear-gradient(135deg, #f7e8d5, #a9c9cc);
+    }
+
+    #firstlight-product-mockup .background-controls {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.1), rgba(255, 255, 255, 0.09));
+      border-radius: 11px;
+      background: light-dark(#f3f6f3, #283034);
+    }
+
+    #firstlight-product-mockup .background-controls.hidden,
+    #firstlight-product-mockup .solid-controls {
+      display: none;
+    }
+
+    #firstlight-product-mockup .solid-controls.open {
+      display: grid;
+      margin-top: 12px;
+    }
+
+    #firstlight-product-mockup .color-control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #firstlight-product-mockup .color-field {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 4px 8px 4px 4px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+      border-radius: 9px;
+      background: light-dark(#ffffff, #333c40);
+    }
+
+    #firstlight-product-mockup .color-input {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .color-label {
+      color: light-dark(#65737a, #a9b5b9);
+      font-size: 0.76rem;
+    }
+
+    #firstlight-product-mockup .direction-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+
+    #firstlight-product-mockup .direction-button {
+      min-height: 32px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+      border-radius: 8px;
+      color: light-dark(#69777e, #aab6ba);
+      background: light-dark(#ffffff, #333c40);
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .direction-button[aria-pressed=&quot;true&quot;] {
+      border-color: light-dark(#668f92, #76aeb1);
+      color: light-dark(#1c3f45, #e8f5f5);
+      background: light-dark(#e5efeb, #34474b);
+    }
+
+    #firstlight-product-mockup .preset-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+    }
+
+    #firstlight-product-mockup .preset-button {
+      height: 30px;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .preset-button[aria-pressed=&quot;true&quot;] {
+      border-color: light-dark(#2f5e63, #a9d2d4);
+      box-shadow: 0 0 0 2px light-dark(#f3f6f3, #283034);
+    }
+
+    #firstlight-product-mockup .preset-one {
+      background: linear-gradient(135deg, #f7e8d5, #a9c9cc);
+    }
+
+    #firstlight-product-mockup .preset-two {
+      background: linear-gradient(135deg, #dce9f5, #d7c8eb);
+    }
+
+    #firstlight-product-mockup .preset-three {
+      background: linear-gradient(135deg, #eadfca, #b8d7c5);
+    }
+
+    #firstlight-product-mockup .preset-four {
+      background: linear-gradient(135deg, #2b3641, #1c272c);
+    }
+
+    #firstlight-product-mockup .token-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+
+    #firstlight-product-mockup .token-input {
+      min-width: 0;
+      min-height: 38px;
+      padding: 0 11px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.13), rgba(255, 255, 255, 0.11));
+      border-radius: 9px;
+      outline: none;
+      color: inherit;
+      background: light-dark(#ffffff, #333c40);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    #firstlight-product-mockup .token-input:focus {
+      border-color: light-dark(#678e91, #72aeb1);
+      box-shadow: 0 0 0 3px light-dark(rgba(91, 137, 140, 0.13), rgba(95, 172, 176, 0.15));
+    }
+
+    #firstlight-product-mockup .connection-meta {
+      display: grid;
+      gap: 4px;
+      margin-bottom: 11px;
+      color: light-dark(#6a787f, #a6b2b6);
+      font-size: 0.75rem;
+    }
+
+    #firstlight-product-mockup .connection-meta strong {
+      color: light-dark(#2d3b42, #dce4e6);
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .manager-button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 40px;
+      padding: 0 11px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+      border-radius: 9px;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .manager-button:hover,
+    #firstlight-product-mockup .manager-button:focus-visible {
+      background: light-dark(#e9eeeb, #2e383c);
+    }
+
+    #firstlight-product-mockup .spaced-label {
+      margin-top: 13px;
+    }
+
+    #firstlight-product-mockup .gist-link-action {
+      margin-top: 7px;
+    }
+
+    #firstlight-product-mockup .gist-panel {
+      padding: 12px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+      border-radius: 11px;
+      background: light-dark(#f0f4f1, #293236);
+    }
+
+    #firstlight-product-mockup .gist-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    #firstlight-product-mockup .gist-status-text {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+    }
+
+    #firstlight-product-mockup .gist-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    #firstlight-product-mockup .action-button {
+      min-height: 36px;
+      padding: 0 10px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.13), rgba(255, 255, 255, 0.11));
+      border-radius: 9px;
+      color: inherit;
+      background: light-dark(#ffffff, #333d41);
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .action-button.primary {
+      border-color: transparent;
+      color: light-dark(#f7fbfa, #102123);
+      background: light-dark(#315f63, #91c9cb);
+    }
+
+    #firstlight-product-mockup .history-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    #firstlight-product-mockup .history-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 46px;
+      padding: 7px 9px;
+      border: 0;
+      border-radius: 9px;
+      text-align: left;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #firstlight-product-mockup .history-item:hover,
+    #firstlight-product-mockup .history-item:focus-visible {
+      background: light-dark(#e9eeeb, #2e383c);
+    }
+
+    #firstlight-product-mockup .history-time,
+    #firstlight-product-mockup .history-reason {
+      display: block;
+    }
+
+    #firstlight-product-mockup .history-time {
+      margin-bottom: 2px;
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .history-reason {
+      color: light-dark(#718087, #9eacb1);
+      font-size: 0.74rem;
+    }
+
+    #firstlight-product-mockup .history-arrow {
+      color: light-dark(#819097, #91a1a6);
+    }
+
+    #firstlight-product-mockup .toast {
+      position: absolute;
+      top: 20px;
+      right: 22px;
+      z-index: 30;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 0 13px;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.13), rgba(255, 255, 255, 0.12));
+      border-radius: 11px;
+      background: light-dark(rgba(251, 252, 250, 0.97), rgba(23, 29, 33, 0.97));
+      box-shadow: 0 14px 36px light-dark(rgba(35, 48, 52, 0.15), rgba(0, 0, 0, 0.35));
+    }
+
+    #firstlight-product-mockup .toast.open {
+      display: flex;
+    }
+
+    #firstlight-product-mockup .diff-layer {
+      position: absolute;
+      inset: 24px;
+      z-index: 40;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid light-dark(rgba(42, 54, 61, 0.15), rgba(255, 255, 255, 0.13));
+      border-radius: 16px;
+      background: light-dark(#f8faf8, #171c20);
+      box-shadow: 0 26px 80px light-dark(rgba(31, 43, 48, 0.28), rgba(0, 0, 0, 0.56));
+    }
+
+    #firstlight-product-mockup .diff-layer.open {
+      display: flex;
+    }
+
+    #firstlight-product-mockup .diff-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 15px 17px;
+      border-bottom: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+    }
+
+    #firstlight-product-mockup .diff-title {
+      margin: 0 0 3px;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .diff-subtitle {
+      color: light-dark(#718087, #9eacb1);
+      font-size: 0.76rem;
+    }
+
+    #firstlight-product-mockup .diff-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-height: 0;
+      flex: 1;
+      background: light-dark(#f5f7f5, #1d2327);
+    }
+
+    #firstlight-product-mockup .diff-column {
+      min-width: 0;
+      border-right: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+    }
+
+    #firstlight-product-mockup .diff-column:last-child {
+      border-right: 0;
+    }
+
+    #firstlight-product-mockup .diff-column-title {
+      padding: 10px 14px;
+      border-bottom: 1px solid light-dark(rgba(42, 54, 61, 0.09), rgba(255, 255, 255, 0.08));
+      color: light-dark(#5e6d74, #abb7bb);
+      background: light-dark(#edf1ee, #252c30);
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    #firstlight-product-mockup .diff-code {
+      margin: 0;
+      padding: 13px 0;
+      overflow: hidden;
+      color: light-dark(#324047, #d8e0e3);
+      font: 0.77rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #firstlight-product-mockup .diff-line {
+      display: block;
+      min-height: 1.65em;
+      padding: 0 14px;
+    }
+
+    #firstlight-product-mockup .diff-line.removed {
+      background: light-dark(#fbe4e1, #492d2e);
+    }
+
+    #firstlight-product-mockup .diff-line.added {
+      background: light-dark(#dff1e6, #254035);
+    }
+
+    #firstlight-product-mockup .diff-line.folded {
+      color: light-dark(#77858c, #96a5aa);
+      background: light-dark(#e9eeeb, #293135);
+    }
+
+    #firstlight-product-mockup .diff-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 13px 16px;
+      border-top: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+    }
+
+    @media (max-width: 700px) {
+      #firstlight-product-mockup .firstlight-window,
+      #firstlight-product-mockup .firstlight-content {
+        min-height: 780px;
+      }
+
+      #firstlight-product-mockup .firstlight-content {
+        justify-content: flex-start;
+        padding-top: 120px;
+      }
+
+      #firstlight-product-mockup .bookmark-grid {
+        grid-template-columns: repeat(3, minmax(82px, 104px));
+      }
+
+      #firstlight-product-mockup .cascade-primary {
+        top: 445px;
+        left: max(12px, calc(50% - 168px));
+      }
+
+      #firstlight-product-mockup .cascade-secondary {
+        top: calc(100% + 7px);
+        left: 0;
+      }
+
+      #firstlight-product-mockup .settings-trigger {
+        opacity: 1;
+      }
+
+      #firstlight-product-mockup .diff-layer {
+        inset: 10px;
+      }
+
+      #firstlight-product-mockup .diff-columns {
+        grid-template-columns: 1fr;
+      }
+
+      #firstlight-product-mockup .diff-column {
+        border-right: 0;
+        border-bottom: 1px solid light-dark(rgba(42, 54, 61, 0.11), rgba(255, 255, 255, 0.1));
+      }
+
+      #firstlight-product-mockup .diff-column:last-child {
+        border-bottom: 0;
+      }
+    }
+
+    @media (max-width: 430px) {
+      #firstlight-product-mockup .bookmark-grid {
+        grid-template-columns: repeat(2, minmax(90px, 116px));
+      }
+
+      #firstlight-product-mockup .cascade-primary {
+        top: 548px;
+        left: 12px;
+      }
+
+      #firstlight-product-mockup .settings-drawer {
+        width: 100%;
+      }
+    }
+  &lt;/style&gt;
+
+  &lt;section class=&quot;firstlight-window&quot; data-background=&quot;gradient&quot; aria-label=&quot;Firstlight 新标签页界面设计&quot;&gt;
+    &lt;div class=&quot;firstlight-topbar&quot;&gt;
+      &lt;div class=&quot;sync-status&quot; role=&quot;status&quot; aria-label=&quot;同步状态：已同步&quot;&gt;
+        &lt;span class=&quot;sync-dot&quot; aria-hidden=&quot;true&quot;&gt;&lt;/span&gt;
+        &lt;span&gt;已同步&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;main class=&quot;firstlight-content&quot;&gt;
+      &lt;div class=&quot;clock&quot; aria-label=&quot;时间 9点41分&quot;&gt;09:41&lt;/div&gt;
+
+      &lt;div class=&quot;search-wrap&quot;&gt;
+        &lt;svg class=&quot;search-icon&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; aria-hidden=&quot;true&quot;&gt;
+          &lt;circle cx=&quot;11&quot; cy=&quot;11&quot; r=&quot;6.5&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.8&quot;&gt;&lt;/circle&gt;
+          &lt;path d=&quot;m16 16 4 4&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.8&quot; stroke-linecap=&quot;round&quot;&gt;&lt;/path&gt;
+        &lt;/svg&gt;
+        &lt;input class=&quot;search-input&quot; type=&quot;search&quot; placeholder=&quot;搜索书签&quot; aria-label=&quot;搜索全部书签&quot;&gt;
+        &lt;div class=&quot;search-results&quot; aria-live=&quot;polite&quot;&gt;
+          &lt;button class=&quot;search-result&quot; type=&quot;button&quot;&gt;
+            &lt;span class=&quot;result-letter&quot;&gt;G&lt;/span&gt;
+            &lt;span&gt;&lt;span class=&quot;result-title&quot;&gt;GitHub&lt;/span&gt;&lt;span class=&quot;result-path&quot;&gt;书签栏 / 开发&lt;/span&gt;&lt;/span&gt;
+          &lt;/button&gt;
+          &lt;button class=&quot;search-result&quot; type=&quot;button&quot;&gt;
+            &lt;span class=&quot;result-letter&quot;&gt;D&lt;/span&gt;
+            &lt;span&gt;&lt;span class=&quot;result-title&quot;&gt;GitHub Docs&lt;/span&gt;&lt;span class=&quot;result-path&quot;&gt;书签栏 / 开发 / 文档&lt;/span&gt;&lt;/span&gt;
+          &lt;/button&gt;
+          &lt;button class=&quot;search-result&quot; type=&quot;button&quot;&gt;
+            &lt;span class=&quot;result-letter&quot;&gt;A&lt;/span&gt;
+            &lt;span&gt;&lt;span class=&quot;result-title&quot;&gt;GitHub Actions&lt;/span&gt;&lt;span class=&quot;result-path&quot;&gt;书签栏 / 工作 / 项目&lt;/span&gt;&lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;bookmark-grid&quot; aria-label=&quot;书签栏&quot;&gt;
+        &lt;button class=&quot;bookmark-tile folder-tile&quot; type=&quot;button&quot; aria-expanded=&quot;false&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol folder&quot;&gt;工&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;工作&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol&quot;&gt;G&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;GitHub&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol&quot;&gt;L&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;Linear&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile folder-tile-secondary&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol folder&quot;&gt;阅&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;阅读&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol&quot;&gt;F&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;Figma&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol&quot;&gt;N&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;Notion&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile folder-tile-secondary&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol folder&quot;&gt;开&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;开发&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;bookmark-tile&quot; type=&quot;button&quot;&gt;
+          &lt;span class=&quot;bookmark-symbol&quot;&gt;邮&lt;/span&gt;
+          &lt;span class=&quot;bookmark-name&quot;&gt;邮箱&lt;/span&gt;
+        &lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;
+
+    &lt;div class=&quot;cascade cascade-primary&quot; role=&quot;menu&quot; aria-label=&quot;工作文件夹&quot;&gt;
+      &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+        &lt;span class=&quot;cascade-glyph&quot;&gt;L&lt;/span&gt;&lt;span&gt;Linear&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;button class=&quot;cascade-item submenu-trigger&quot; type=&quot;button&quot; role=&quot;menuitem&quot; aria-expanded=&quot;false&quot;&gt;
+        &lt;span class=&quot;cascade-glyph&quot;&gt;▣&lt;/span&gt;&lt;span&gt;项目&lt;/span&gt;&lt;span class=&quot;cascade-arrow&quot;&gt;›&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+        &lt;span class=&quot;cascade-glyph&quot;&gt;F&lt;/span&gt;&lt;span&gt;Figma&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+        &lt;span class=&quot;cascade-glyph&quot;&gt;日&lt;/span&gt;&lt;span&gt;日历&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+      &lt;/button&gt;
+
+      &lt;div class=&quot;cascade cascade-secondary&quot; role=&quot;menu&quot; aria-label=&quot;项目子文件夹&quot;&gt;
+        &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+          &lt;span class=&quot;cascade-glyph&quot;&gt;A&lt;/span&gt;&lt;span&gt;GitHub Actions&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+          &lt;span class=&quot;cascade-glyph&quot;&gt;S&lt;/span&gt;&lt;span&gt;Staging&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;button class=&quot;cascade-item&quot; type=&quot;button&quot; role=&quot;menuitem&quot;&gt;
+          &lt;span class=&quot;cascade-glyph&quot;&gt;文&lt;/span&gt;&lt;span&gt;项目文档&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+        &lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;button class=&quot;settings-trigger&quot; type=&quot;button&quot; aria-label=&quot;打开设置&quot; aria-expanded=&quot;false&quot;&gt;⚙&lt;/button&gt;
+    &lt;button class=&quot;drawer-scrim&quot; type=&quot;button&quot; aria-label=&quot;关闭设置&quot;&gt;&lt;/button&gt;
+
+    &lt;aside class=&quot;settings-drawer&quot; aria-label=&quot;设置抽屉&quot;&gt;
+      &lt;div class=&quot;drawer-header&quot;&gt;
+        &lt;h2 class=&quot;drawer-title&quot;&gt;设置&lt;/h2&gt;
+        &lt;button class=&quot;icon-button close-settings&quot; type=&quot;button&quot; aria-label=&quot;关闭设置&quot;&gt;×&lt;/button&gt;
+      &lt;/div&gt;
+
+      &lt;section class=&quot;setting-section&quot;&gt;
+        &lt;div class=&quot;setting-label-row&quot;&gt;
+          &lt;span class=&quot;setting-label&quot;&gt;书签&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;Chrome 书签栏&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;button class=&quot;manager-button manager-action&quot; type=&quot;button&quot;&gt;
+          &lt;span&gt;打开 Chrome 书签管理器&lt;/span&gt;&lt;span&gt;↗&lt;/span&gt;
+        &lt;/button&gt;
+        &lt;div class=&quot;setting-label-row spaced-label&quot;&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;打开位置&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;首次默认&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;segmented&quot; aria-label=&quot;书签打开位置&quot;&gt;
+          &lt;button type=&quot;button&quot; aria-pressed=&quot;false&quot;&gt;当前标签页&lt;/button&gt;
+          &lt;button type=&quot;button&quot; aria-pressed=&quot;true&quot;&gt;新标签页&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section class=&quot;setting-section&quot;&gt;
+        &lt;div class=&quot;setting-label-row&quot;&gt;
+          &lt;span class=&quot;setting-label&quot;&gt;背景&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;本地 CSS&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;background-row&quot;&gt;
+          &lt;button class=&quot;background-choice&quot; type=&quot;button&quot; data-choice=&quot;solid&quot; aria-pressed=&quot;false&quot;&gt;
+            &lt;span class=&quot;background-swatch&quot;&gt;&lt;/span&gt;&lt;span&gt;纯色&lt;/span&gt;
+          &lt;/button&gt;
+          &lt;button class=&quot;background-choice&quot; type=&quot;button&quot; data-choice=&quot;gradient&quot; aria-pressed=&quot;true&quot;&gt;
+            &lt;span class=&quot;background-swatch gradient&quot;&gt;&lt;/span&gt;&lt;span&gt;渐变&lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;background-controls solid-controls&quot;&gt;
+          &lt;div class=&quot;setting-help&quot;&gt;背景颜色&lt;/div&gt;
+          &lt;label class=&quot;color-field&quot;&gt;
+            &lt;input class=&quot;color-input solid-color&quot; type=&quot;color&quot; value=&quot;#e9eee8&quot; aria-label=&quot;纯色背景颜色&quot;&gt;
+            &lt;span class=&quot;color-label&quot;&gt;纯色&lt;/span&gt;
+          &lt;/label&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;background-controls&quot;&gt;
+          &lt;div class=&quot;setting-help&quot;&gt;渐变颜色&lt;/div&gt;
+          &lt;div class=&quot;color-control-grid&quot;&gt;
+            &lt;label class=&quot;color-field&quot;&gt;
+              &lt;input class=&quot;color-input gradient-color-one&quot; type=&quot;color&quot; value=&quot;#f7e8d5&quot; aria-label=&quot;渐变起始颜色&quot;&gt;
+              &lt;span class=&quot;color-label&quot;&gt;起始色&lt;/span&gt;
+            &lt;/label&gt;
+            &lt;label class=&quot;color-field&quot;&gt;
+              &lt;input class=&quot;color-input gradient-color-two&quot; type=&quot;color&quot; value=&quot;#a9c9cc&quot; aria-label=&quot;渐变结束颜色&quot;&gt;
+              &lt;span class=&quot;color-label&quot;&gt;结束色&lt;/span&gt;
+            &lt;/label&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;setting-help&quot;&gt;方向&lt;/div&gt;
+          &lt;div class=&quot;direction-row&quot; aria-label=&quot;渐变方向&quot;&gt;
+            &lt;button class=&quot;direction-button&quot; type=&quot;button&quot; data-angle=&quot;0&quot; aria-pressed=&quot;false&quot;&gt;↑&lt;/button&gt;
+            &lt;button class=&quot;direction-button&quot; type=&quot;button&quot; data-angle=&quot;90&quot; aria-pressed=&quot;false&quot;&gt;→&lt;/button&gt;
+            &lt;button class=&quot;direction-button&quot; type=&quot;button&quot; data-angle=&quot;135&quot; aria-pressed=&quot;true&quot;&gt;↘&lt;/button&gt;
+            &lt;button class=&quot;direction-button&quot; type=&quot;button&quot; data-angle=&quot;180&quot; aria-pressed=&quot;false&quot;&gt;↓&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;setting-help&quot;&gt;预设&lt;/div&gt;
+          &lt;div class=&quot;preset-row&quot; aria-label=&quot;渐变预设&quot;&gt;
+            &lt;button class=&quot;preset-button preset-one&quot; type=&quot;button&quot; data-colors=&quot;#f7e8d5,#a9c9cc&quot; aria-label=&quot;晨雾渐变&quot; aria-pressed=&quot;true&quot;&gt;&lt;/button&gt;
+            &lt;button class=&quot;preset-button preset-two&quot; type=&quot;button&quot; data-colors=&quot;#dce9f5,#d7c8eb&quot; aria-label=&quot;暮光渐变&quot; aria-pressed=&quot;false&quot;&gt;&lt;/button&gt;
+            &lt;button class=&quot;preset-button preset-three&quot; type=&quot;button&quot; data-colors=&quot;#eadfca,#b8d7c5&quot; aria-label=&quot;林地渐变&quot; aria-pressed=&quot;false&quot;&gt;&lt;/button&gt;
+            &lt;button class=&quot;preset-button preset-four&quot; type=&quot;button&quot; data-colors=&quot;#2b3641,#1c272c&quot; aria-label=&quot;深夜渐变&quot; aria-pressed=&quot;false&quot;&gt;&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section class=&quot;setting-section&quot;&gt;
+        &lt;div class=&quot;setting-label-row&quot;&gt;
+          &lt;span class=&quot;setting-label&quot;&gt;GitHub 同步&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;Secret Gist&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;token-row&quot;&gt;
+          &lt;input class=&quot;token-input&quot; type=&quot;password&quot; value=&quot;github_pat_firstlight_demo&quot; aria-label=&quot;GitHub token&quot;&gt;
+          &lt;button class=&quot;action-button token-action&quot; type=&quot;button&quot;&gt;保存 Token&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;gist-panel&quot;&gt;
+          &lt;div class=&quot;gist-status&quot;&gt;
+            &lt;span class=&quot;gist-status-text&quot;&gt;&lt;span class=&quot;sync-dot&quot;&gt;&lt;/span&gt;&lt;strong&gt;已绑定&lt;/strong&gt;&lt;/span&gt;
+            &lt;span class=&quot;setting-help&quot;&gt;刚刚同步&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;connection-meta&quot;&gt;
+            &lt;span&gt;&lt;strong&gt;Firstlight Snapshot&lt;/strong&gt; · firstlight.json&lt;/span&gt;
+            &lt;span&gt;远端更新：今天 09:38 · 内容哈希 a41f…9c2e&lt;/span&gt;
+            &lt;span&gt;自动上传：书签或设置变化后 3 秒&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;gist-actions&quot;&gt;
+            &lt;button class=&quot;action-button upload-action&quot; type=&quot;button&quot;&gt;上传快照&lt;/button&gt;
+            &lt;button class=&quot;action-button open-diff&quot; type=&quot;button&quot;&gt;下载并对比&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;button class=&quot;manager-button gist-link-action&quot; type=&quot;button&quot;&gt;
+            &lt;span&gt;在 GitHub 打开 Gist&lt;/span&gt;&lt;span&gt;↗&lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section class=&quot;setting-section&quot;&gt;
+        &lt;div class=&quot;setting-label-row&quot;&gt;
+          &lt;span class=&quot;setting-label&quot;&gt;恢复历史&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;最近 3 份&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;history-list&quot;&gt;
+          &lt;button class=&quot;history-item open-history&quot; type=&quot;button&quot;&gt;
+            &lt;span&gt;&lt;span class=&quot;history-time&quot;&gt;今天 09:18&lt;/span&gt;&lt;span class=&quot;history-reason&quot;&gt;自动恢复前&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;history-arrow&quot;&gt;›&lt;/span&gt;
+          &lt;/button&gt;
+          &lt;button class=&quot;history-item open-history&quot; type=&quot;button&quot;&gt;
+            &lt;span&gt;&lt;span class=&quot;history-time&quot;&gt;昨天 18:42&lt;/span&gt;&lt;span class=&quot;history-reason&quot;&gt;手动恢复前&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;history-arrow&quot;&gt;›&lt;/span&gt;
+          &lt;/button&gt;
+          &lt;button class=&quot;history-item open-history&quot; type=&quot;button&quot;&gt;
+            &lt;span&gt;&lt;span class=&quot;history-time&quot;&gt;8 月 9 日 10:06&lt;/span&gt;&lt;span class=&quot;history-reason&quot;&gt;历史恢复前&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;history-arrow&quot;&gt;›&lt;/span&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;section class=&quot;setting-section&quot;&gt;
+        &lt;div class=&quot;setting-label-row&quot;&gt;
+          &lt;span class=&quot;setting-label&quot;&gt;连接与诊断&lt;/span&gt;
+          &lt;span class=&quot;setting-help&quot;&gt;本机&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;connection-meta&quot;&gt;
+          &lt;span&gt;状态：&lt;strong&gt;在线 · 鉴权正常&lt;/strong&gt;&lt;/span&gt;
+          &lt;span&gt;快照：2.6 MiB / 10 MiB&lt;/span&gt;
+          &lt;span&gt;恢复点：3 / 3 · 本地存储正常&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;button class=&quot;manager-button disconnect-action&quot; type=&quot;button&quot;&gt;
+          &lt;span&gt;断开 GitHub 连接&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;
+        &lt;/button&gt;
+      &lt;/section&gt;
+    &lt;/aside&gt;
+
+    &lt;div class=&quot;toast&quot; role=&quot;status&quot;&gt;
+      &lt;span class=&quot;sync-dot&quot;&gt;&lt;/span&gt;&lt;span class=&quot;toast-text&quot;&gt;已上传到远端&lt;/span&gt;
+    &lt;/div&gt;
+
+    &lt;section class=&quot;diff-layer&quot; aria-label=&quot;书签快照差异&quot;&gt;
+      &lt;div class=&quot;diff-header&quot;&gt;
+        &lt;div&gt;
+          &lt;h2 class=&quot;diff-title&quot;&gt;快照差异&lt;/h2&gt;
+          &lt;div class=&quot;diff-subtitle&quot;&gt;完整内容在本机比较 · 超长 Data URL 已折叠显示&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;button class=&quot;icon-button close-diff&quot; type=&quot;button&quot; aria-label=&quot;关闭差异视图&quot;&gt;×&lt;/button&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;diff-columns&quot;&gt;
+        &lt;div class=&quot;diff-column&quot;&gt;
+          &lt;div class=&quot;diff-column-title left-diff-title&quot;&gt;本机&lt;/div&gt;
+          &lt;pre class=&quot;diff-code&quot;&gt;&lt;span class=&quot;diff-line&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  &quot;openTarget&quot;: &quot;new&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  &quot;bookmarks&quot;: [&lt;/span&gt;&lt;span class=&quot;diff-line folded&quot;&gt;    ··· 12 行未变化 ···&lt;/span&gt;&lt;span class=&quot;diff-line removed&quot;&gt;    { &quot;title&quot;: &quot;项目文档&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line removed&quot;&gt;      &quot;url&quot;: &quot;https://docs.old.test&quot; },&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;    { &quot;title&quot;: &quot;Data 工具&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;      &quot;url&quot;: &quot;data:text/html;base64,PGh0... [2.4 MiB · SHA-256 a41f…]&quot; }&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  ]&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;}&lt;/span&gt;&lt;/pre&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;diff-column&quot;&gt;
+          &lt;div class=&quot;diff-column-title right-diff-title&quot;&gt;远端&lt;/div&gt;
+          &lt;pre class=&quot;diff-code&quot;&gt;&lt;span class=&quot;diff-line&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  &quot;openTarget&quot;: &quot;new&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  &quot;bookmarks&quot;: [&lt;/span&gt;&lt;span class=&quot;diff-line folded&quot;&gt;    ··· 12 行未变化 ···&lt;/span&gt;&lt;span class=&quot;diff-line added&quot;&gt;    { &quot;title&quot;: &quot;项目文档&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line added&quot;&gt;      &quot;url&quot;: &quot;https://docs.firstlight.app&quot; },&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;    { &quot;title&quot;: &quot;Data 工具&quot;,&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;      &quot;url&quot;: &quot;data:text/html;base64,PGh0... [2.4 MiB · SHA-256 a41f…]&quot; }&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;  ]&lt;/span&gt;&lt;span class=&quot;diff-line&quot;&gt;}&lt;/span&gt;&lt;/pre&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;diff-footer&quot;&gt;
+        &lt;button class=&quot;action-button use-left&quot; type=&quot;button&quot;&gt;用本机覆盖远端&lt;/button&gt;
+        &lt;button class=&quot;action-button primary use-right&quot; type=&quot;button&quot;&gt;用远端覆盖本机&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+  &lt;/section&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;firstlight-product-mockup&#x27;);
+      const product = root.querySelector(&#x27;.firstlight-window&#x27;);
+      const folderTile = root.querySelector(&#x27;.folder-tile&#x27;);
+      const primaryMenu = root.querySelector(&#x27;.cascade-primary&#x27;);
+      const submenuTrigger = root.querySelector(&#x27;.submenu-trigger&#x27;);
+      const secondaryMenu = root.querySelector(&#x27;.cascade-secondary&#x27;);
+      const settingsTrigger = root.querySelector(&#x27;.settings-trigger&#x27;);
+      const settingsDrawer = root.querySelector(&#x27;.settings-drawer&#x27;);
+      const drawerScrim = root.querySelector(&#x27;.drawer-scrim&#x27;);
+      const diffLayer = root.querySelector(&#x27;.diff-layer&#x27;);
+      const searchInput = root.querySelector(&#x27;.search-input&#x27;);
+      const searchResults = root.querySelector(&#x27;.search-results&#x27;);
+      const toast = root.querySelector(&#x27;.toast&#x27;);
+      const toastText = root.querySelector(&#x27;.toast-text&#x27;);
+      const gradientControls = root.querySelector(&#x27;.background-controls:not(.solid-controls)&#x27;);
+      const solidControls = root.querySelector(&#x27;.solid-controls&#x27;);
+      const gradientColorOne = root.querySelector(&#x27;.gradient-color-one&#x27;);
+      const gradientColorTwo = root.querySelector(&#x27;.gradient-color-two&#x27;);
+      const solidColor = root.querySelector(&#x27;.solid-color&#x27;);
+      let gradientAngle = 135;
+
+      const closeMenus = () =&gt; {
+        primaryMenu.classList.remove(&#x27;open&#x27;);
+        secondaryMenu.classList.remove(&#x27;open&#x27;);
+        folderTile.classList.remove(&#x27;active&#x27;);
+        submenuTrigger.classList.remove(&#x27;active&#x27;);
+        folderTile.setAttribute(&#x27;aria-expanded&#x27;, &#x27;false&#x27;);
+        submenuTrigger.setAttribute(&#x27;aria-expanded&#x27;, &#x27;false&#x27;);
+      };
+
+      const closeSettings = () =&gt; {
+        settingsDrawer.classList.remove(&#x27;open&#x27;);
+        drawerScrim.classList.remove(&#x27;open&#x27;);
+        settingsTrigger.classList.remove(&#x27;active&#x27;);
+        settingsTrigger.setAttribute(&#x27;aria-expanded&#x27;, &#x27;false&#x27;);
+      };
+
+      const openSettings = () =&gt; {
+        closeMenus();
+        settingsDrawer.classList.add(&#x27;open&#x27;);
+        drawerScrim.classList.add(&#x27;open&#x27;);
+        settingsTrigger.classList.add(&#x27;active&#x27;);
+        settingsTrigger.setAttribute(&#x27;aria-expanded&#x27;, &#x27;true&#x27;);
+      };
+
+      const showToast = message =&gt; {
+        toastText.textContent = message;
+        toast.classList.add(&#x27;open&#x27;);
+        window.setTimeout(() =&gt; toast.classList.remove(&#x27;open&#x27;), 1800);
+      };
+
+      folderTile.addEventListener(&#x27;click&#x27;, event =&gt; {
+        event.stopPropagation();
+        const willOpen = !primaryMenu.classList.contains(&#x27;open&#x27;);
+        closeMenus();
+        if (willOpen) {
+          primaryMenu.classList.add(&#x27;open&#x27;);
+          folderTile.classList.add(&#x27;active&#x27;);
+          folderTile.setAttribute(&#x27;aria-expanded&#x27;, &#x27;true&#x27;);
+        }
+      });
+
+      submenuTrigger.addEventListener(&#x27;click&#x27;, event =&gt; {
+        event.stopPropagation();
+        const willOpen = !secondaryMenu.classList.contains(&#x27;open&#x27;);
+        secondaryMenu.classList.toggle(&#x27;open&#x27;, willOpen);
+        submenuTrigger.classList.toggle(&#x27;active&#x27;, willOpen);
+        submenuTrigger.setAttribute(&#x27;aria-expanded&#x27;, String(willOpen));
+      });
+
+      product.addEventListener(&#x27;click&#x27;, event =&gt; {
+        if (!event.target.closest(&#x27;.cascade&#x27;) &amp;&amp; !event.target.closest(&#x27;.folder-tile&#x27;)) closeMenus();
+      });
+
+      settingsTrigger.addEventListener(&#x27;click&#x27;, openSettings);
+      root.querySelector(&#x27;.close-settings&#x27;).addEventListener(&#x27;click&#x27;, closeSettings);
+      drawerScrim.addEventListener(&#x27;click&#x27;, closeSettings);
+
+      root.querySelectorAll(&#x27;.segmented button&#x27;).forEach(button =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;.segmented button&#x27;).forEach(peer =&gt; peer.setAttribute(&#x27;aria-pressed&#x27;, &#x27;false&#x27;));
+          button.setAttribute(&#x27;aria-pressed&#x27;, &#x27;true&#x27;);
+        });
+      });
+
+      const applyBackground = () =&gt; {
+        if (product.dataset.background === &#x27;solid&#x27;) {
+          product.style.background = solidColor.value;
+          return;
+        }
+        product.style.background = `linear-gradient(${gradientAngle}deg, ${gradientColorOne.value}, ${gradientColorTwo.value})`;
+      };
+
+      root.querySelectorAll(&#x27;.background-choice&#x27;).forEach(button =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;.background-choice&#x27;).forEach(peer =&gt; peer.setAttribute(&#x27;aria-pressed&#x27;, &#x27;false&#x27;));
+          button.setAttribute(&#x27;aria-pressed&#x27;, &#x27;true&#x27;);
+          product.dataset.background = button.dataset.choice;
+          const isSolid = button.dataset.choice === &#x27;solid&#x27;;
+          solidControls.classList.toggle(&#x27;open&#x27;, isSolid);
+          gradientControls.classList.toggle(&#x27;hidden&#x27;, isSolid);
+          applyBackground();
+        });
+      });
+
+      gradientColorOne.addEventListener(&#x27;input&#x27;, applyBackground);
+      gradientColorTwo.addEventListener(&#x27;input&#x27;, applyBackground);
+      solidColor.addEventListener(&#x27;input&#x27;, applyBackground);
+
+      root.querySelectorAll(&#x27;.direction-button&#x27;).forEach(button =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;.direction-button&#x27;).forEach(peer =&gt; peer.setAttribute(&#x27;aria-pressed&#x27;, &#x27;false&#x27;));
+          button.setAttribute(&#x27;aria-pressed&#x27;, &#x27;true&#x27;);
+          gradientAngle = Number(button.dataset.angle);
+          applyBackground();
+        });
+      });
+
+      root.querySelectorAll(&#x27;.preset-button&#x27;).forEach(button =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; {
+          root.querySelectorAll(&#x27;.preset-button&#x27;).forEach(peer =&gt; peer.setAttribute(&#x27;aria-pressed&#x27;, &#x27;false&#x27;));
+          button.setAttribute(&#x27;aria-pressed&#x27;, &#x27;true&#x27;);
+          const [first, second] = button.dataset.colors.split(&#x27;,&#x27;);
+          gradientColorOne.value = first;
+          gradientColorTwo.value = second;
+          product.dataset.background = &#x27;gradient&#x27;;
+          root.querySelectorAll(&#x27;.background-choice&#x27;).forEach(peer =&gt; peer.setAttribute(&#x27;aria-pressed&#x27;, String(peer.dataset.choice === &#x27;gradient&#x27;)));
+          solidControls.classList.remove(&#x27;open&#x27;);
+          gradientControls.classList.remove(&#x27;hidden&#x27;);
+          applyBackground();
+        });
+      });
+
+      searchInput.addEventListener(&#x27;input&#x27;, () =&gt; {
+        const hasQuery = searchInput.value.trim().length &gt; 0;
+        searchResults.classList.toggle(&#x27;open&#x27;, hasQuery);
+      });
+
+      searchInput.addEventListener(&#x27;keydown&#x27;, event =&gt; {
+        if (event.key === &#x27;Escape&#x27;) {
+          searchInput.value = &#x27;&#x27;;
+          searchResults.classList.remove(&#x27;open&#x27;);
+          searchInput.blur();
+        }
+      });
+
+      const openDiff = historyMode =&gt; {
+        closeSettings();
+        closeMenus();
+        root.querySelector(&#x27;.left-diff-title&#x27;).textContent = &#x27;本机&#x27;;
+        root.querySelector(&#x27;.right-diff-title&#x27;).textContent = historyMode ? &#x27;恢复点 · 今天 09:18&#x27; : &#x27;远端&#x27;;
+        root.querySelector(&#x27;.use-left&#x27;).textContent = historyMode ? &#x27;保留当前状态&#x27; : &#x27;用本机覆盖远端&#x27;;
+        root.querySelector(&#x27;.use-right&#x27;).textContent = historyMode ? &#x27;恢复到此版本&#x27; : &#x27;用远端覆盖本机&#x27;;
+        diffLayer.classList.add(&#x27;open&#x27;);
+      };
+
+      root.querySelectorAll(&#x27;.open-diff&#x27;).forEach(button =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; openDiff(false)));
+      root.querySelectorAll(&#x27;.open-history&#x27;).forEach(button =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; openDiff(true)));
+      root.querySelector(&#x27;.close-diff&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; diffLayer.classList.remove(&#x27;open&#x27;));
+      root.querySelector(&#x27;.use-left&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        diffLayer.classList.remove(&#x27;open&#x27;);
+        showToast(&#x27;已保留本机状态&#x27;);
+      });
+      root.querySelector(&#x27;.use-right&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        const historyMode = root.querySelector(&#x27;.use-right&#x27;).textContent.includes(&#x27;此版本&#x27;);
+        diffLayer.classList.remove(&#x27;open&#x27;);
+        showToast(historyMode ? &#x27;已恢复到历史版本&#x27; : &#x27;已恢复到远端快照&#x27;);
+      });
+
+      root.querySelector(&#x27;.upload-action&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        closeSettings();
+        showToast(&#x27;已上传到远端&#x27;);
+      });
+
+      root.querySelector(&#x27;.token-action&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;Token 已保存在本机&#x27;));
+      root.querySelector(&#x27;.manager-action&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;将在扩展中打开 Chrome 书签管理器&#x27;));
+      root.querySelector(&#x27;.gist-link-action&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;将在扩展中打开对应 Gist&#x27;));
+      root.querySelector(&#x27;.disconnect-action&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;设计预览：连接保持不变&#x27;));
+
+      if (window.location.hash === &#x27;#settings&#x27;) openSettings();
+      if (window.location.hash === &#x27;#diff&#x27;) openDiff(false);
+
+      root.addEventListener(&#x27;keydown&#x27;, event =&gt; {
+        if (event.key !== &#x27;Escape&#x27;) return;
+        if (diffLayer.classList.contains(&#x27;open&#x27;)) diffLayer.classList.remove(&#x27;open&#x27;);
+        else if (settingsDrawer.classList.contains(&#x27;open&#x27;)) closeSettings();
+        else closeMenus();
+      });
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>
