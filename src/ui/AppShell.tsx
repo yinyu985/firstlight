@@ -1,5 +1,5 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Notebook, Search, Settings } from "lucide-react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
 import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
 import type { AppState } from "../shared/protocol";
 import { canOpenBookmark } from "../shared/url";
@@ -139,7 +139,10 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
     {nodes.map((item, index) => {
       const isFolder = item.children !== undefined;
       const isExpanded = expanded.has(index);
-      return <div className="folder-entry" key={`${item.title}-${index}`}>
+      return <div
+        className={`folder-entry ${isExpanded ? "is-expanded" : ""}`}
+        key={`${item.title}-${index}`}
+      >
         <button
           className={`folder-row ${isFolder ? "is-folder" : ""}`}
           disabled={!isFolder && item.url !== undefined && !canOpenBookmark(item.url)}
@@ -154,7 +157,7 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
           }}
         >
           <span className="folder-row-content">
-            {isFolder && <span className="row-mark">{isExpanded ? "−" : "+"}</span>}
+            {isFolder && <span className="row-mark" aria-hidden="true">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>}
             <span className="row-title">{item.title || "UNTITLED"}</span>
             {isFolder && showDetails && <span className="row-count">{countUrls(item.children ?? [])}</span>}
           </span>
@@ -165,9 +168,33 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
   </div>;
 }
 
+const FOLDER_SCROLLBAR_INSET = 2;
+const FOLDER_SCROLLBAR_MAX_LENGTH = 20;
+
+interface FolderScrollbarState {
+  visible: boolean;
+  offset: number;
+  length: number;
+}
+
+function folderScrollbarState(element: HTMLDivElement): FolderScrollbarState {
+  const scrollRange = element.scrollHeight - element.clientHeight;
+  const trackLength = Math.max(0, element.clientHeight - FOLDER_SCROLLBAR_INSET * 2);
+  const length = Math.min(FOLDER_SCROLLBAR_MAX_LENGTH, trackLength);
+  const travel = Math.max(0, trackLength - length);
+  return {
+    visible: scrollRange > 1 && length > 0,
+    offset: scrollRange > 0 ? (element.scrollTop / scrollRange) * travel : 0,
+    length
+  };
+}
+
 function FolderPopover({ nodes, onOpen, background, foreground, showDetails }: { nodes: BookmarkItem[]; onOpen: (item: BookmarkItem) => void; background: Background; foreground: string; showDetails: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
   const [maxHeight, setMaxHeight] = useState(240);
+  const [scrollbar, setScrollbar] = useState<FolderScrollbarState>({ visible: false, offset: 0, length: FOLDER_SCROLLBAR_MAX_LENGTH });
   const theme = useLocalPanelTheme(ref, background, foreground);
   useLayoutEffect(() => {
     const fit = () => {
@@ -179,8 +206,54 @@ function FolderPopover({ nodes, onOpen, background, foreground, showDetails }: {
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+  useLayoutEffect(() => {
+    const scrollArea = scrollRef.current;
+    if (!scrollArea) return;
+    const update = () => setScrollbar(folderScrollbarState(scrollArea));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scrollArea);
+    if (scrollArea.firstElementChild) observer.observe(scrollArea.firstElementChild);
+    return () => observer.disconnect();
+  }, [maxHeight, nodes]);
+
+  const dragScrollbar = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = scrollbarDragRef.current;
+    const scrollArea = scrollRef.current;
+    if (!drag || !scrollArea || drag.pointerId !== event.pointerId) return;
+    const scrollRange = scrollArea.scrollHeight - scrollArea.clientHeight;
+    const trackLength = Math.max(0, scrollArea.clientHeight - FOLDER_SCROLLBAR_INSET * 2);
+    const travel = trackLength - scrollbar.length;
+    if (travel > 0) scrollArea.scrollTop = drag.startScrollTop + ((event.clientY - drag.startY) / travel) * scrollRange;
+  };
+
   return <div className="folder-popover" ref={ref} style={{ maxHeight, ...localThemeVariables(theme) }}>
-    <FolderList nodes={nodes} onOpen={onOpen} showDetails={showDetails} />
+    <div
+      className="folder-scroll-area"
+      ref={scrollRef}
+      onScroll={(event) => setScrollbar(folderScrollbarState(event.currentTarget))}
+    >
+      <div className="folder-scroll-content">
+        <FolderList nodes={nodes} onOpen={onOpen} showDetails={showDetails} />
+      </div>
+    </div>
+    {scrollbar.visible && <div className="folder-scrollbar" aria-hidden="true">
+      <div
+        className="folder-scrollbar-thumb"
+        style={{ height: scrollbar.length, transform: `translateY(${scrollbar.offset}px)` }}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          scrollbarDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: scrollRef.current?.scrollTop ?? 0 };
+        }}
+        onPointerMove={dragScrollbar}
+        onPointerUp={(event) => {
+          if (scrollbarDragRef.current?.pointerId === event.pointerId) scrollbarDragRef.current = null;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => { scrollbarDragRef.current = null; }}
+      />
+    </div>}
   </div>;
 }
 
