@@ -1,3 +1,5 @@
+import { isDynamicEffect, isDynamicEffectInput, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed, type DynamicEffect, type DynamicEffectParameters } from "./dynamicEffects";
+export type { DynamicEffect, DynamicEffectParameters } from "./dynamicEffects";
 export const SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const SNAPSHOT_FILE_NAME = "firstlight.json";
 export const GIST_DESCRIPTION = "Firstlight bookmark snapshot";
@@ -8,7 +10,17 @@ export type OpenTarget = "new-tab" | "current-tab";
 export type Background =
   | { type: "solid"; color: string }
   | { type: "gradient"; from: string; to: string; angle: number }
-  | { type: "dynamic"; from: string; to: string; angle: number; speed: number };
+  | { type: "dynamic"; effect: DynamicEffect; from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
+
+export interface DynamicEffectProfile {
+  from: string;
+  to: string;
+  angle: number;
+  speed: number;
+  parameters?: DynamicEffectParameters;
+}
+
+export type DynamicEffectProfiles = Partial<Record<DynamicEffect, DynamicEffectProfile>>;
 
 export interface Foreground {
   color: string;
@@ -57,6 +69,7 @@ export interface BookmarkItem {
 export interface SyncedSettings {
   openTarget: OpenTarget;
   background: Background;
+  dynamicEffectProfiles?: DynamicEffectProfiles;
   foreground: Foreground;
   layout: HomeLayout;
   clockPosition: ClockPosition;
@@ -160,14 +173,42 @@ export function canonicalSettings(settings: SyncedSettings): SyncedSettings {
         }
       : {
           type: "dynamic" as const,
+          effect: normalizeDynamicEffect(settings.background.effect),
           from: settings.background.from,
           to: settings.background.to,
           angle: settings.background.angle,
-          speed: settings.background.speed
+          speed: normalizeDynamicSpeed(normalizeDynamicEffect(settings.background.effect), settings.background.speed),
+          parameters: normalizeDynamicParameters(
+            normalizeDynamicEffect(settings.background.effect),
+            settings.background.parameters
+          )
         };
+  const dynamicEffectProfiles: DynamicEffectProfiles = {};
+  for (const [effectInput, profile] of Object.entries(settings.dynamicEffectProfiles ?? {})) {
+    if (!isDynamicEffectInput(effectInput) || !profile) continue;
+    const effect = normalizeDynamicEffect(effectInput);
+    if (!isDynamicEffect(effectInput) && dynamicEffectProfiles[effect] !== undefined) continue;
+    dynamicEffectProfiles[effect] = {
+      from: profile.from,
+      to: profile.to,
+      angle: profile.angle,
+      speed: normalizeDynamicSpeed(effect, profile.speed),
+      parameters: normalizeDynamicParameters(effect, profile.parameters)
+    };
+  }
+  if (background.type === "dynamic") {
+    dynamicEffectProfiles[background.effect] = {
+      from: background.from,
+      to: background.to,
+      angle: background.angle,
+      speed: background.speed,
+      parameters: background.parameters
+    };
+  }
   return {
     openTarget: settings.openTarget,
     background,
+    dynamicEffectProfiles,
     foreground: {
       color: settings.foreground.color,
       fontSize: settings.foreground.fontSize

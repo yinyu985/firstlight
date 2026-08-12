@@ -28,10 +28,11 @@ describe("deriveFolderTheme", () => {
   });
 
   it("uses a translucent local surface for a dynamic background", () => {
-    const background = { type: "dynamic" as const, from: "#071018", to: "#20bca0", angle: 145, speed: 10 };
+    const background = { type: "dynamic" as const, effect: "flow" as const, from: "#071018", to: "#20bca0", angle: 145, speed: 10 };
     const first = deriveFolderTheme(background, "#ffffff", { x: 20, y: 25, width: 100, height: 100 });
     const second = deriveFolderTheme(background, "#ffffff", { x: 80, y: 75, width: 100, height: 100 });
     expect(first.surface).toMatch(/^rgba\(/);
     expect(second.surface).toBe(first.surface);
   });
+
 });

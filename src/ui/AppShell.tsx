@@ -1,6 +1,19 @@
+import type { DynamicEffect } from "../shared/dynamicEffects";
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
 import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
+import {
+  type ColorParameterDefinition,
+  type DynamicEffectParameterDefinition,
+  type DynamicEffectParameters,
+  type RangeParameterDefinition,
+  getDynamicEffectDefinition,
+  DYNAMIC_EFFECT_DEFINITIONS,
+  type SelectParameterDefinition,
+  type ToggleParameterDefinition,
+  normalizeDynamicParameters,
+  normalizeDynamicSpeed
+} from "../shared/dynamicEffects";
 import type { AppState } from "../shared/protocol";
 import { canOpenBookmark } from "../shared/url";
 import { searchBookmarks } from "./bookmarks";
@@ -62,8 +75,7 @@ function fitGrid(columns: number, viewportWidth: number): GridFit {
   };
 }
 
-function backgroundImageCss(settings: SyncedSettings): string {
-  const background = settings.background;
+function backgroundImageCss(background: Background): string {
   if (background.type === "solid") return "none";
   return `linear-gradient(${background.angle}deg in oklab, ${background.from}, ${background.to})`;
 }
@@ -303,6 +315,205 @@ function ClockPicker({ value, onChange }: { value: ClockPosition; onChange: (val
   </div>;
 }
 
+function DynamicEffectPicker({ value, onChange }: { value: DynamicEffect; onChange: (value: DynamicEffect) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismissablePicker(open, setOpen);
+  const effects = DYNAMIC_EFFECT_DEFINITIONS;
+  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
+    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" /></button>
+    {open && <div className="picker-menu effect-menu">{effects.map((effect) => {
+      return <button
+        key={effect.id}
+        className={effect.id === value ? "selected" : ""}
+        disabled={!effect.implemented}
+        onClick={() => {
+          if (!effect.implemented) return;
+          onChange(effect.id);
+          setOpen(false);
+        }}
+      >
+        {effect.label}
+      </button>;
+    })}</div>}
+  </div>;
+}
+
+const DYNAMIC_EFFECT_PARAMETER_LABELS = {
+  range: "range",
+  color: "color",
+  toggle: "toggle",
+  select: "select"
+} as const;
+
+function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spec: RangeParameterDefinition; onChange: (value: number) => void }) {
+  const numericValue = Number.isFinite(value) ? value : spec.defaultValue;
+  const safeValue = spec.integer ? Math.round(numericValue) : numericValue;
+
+  return <div className="setting-line size-line">
+    <label>{spec.label} <b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b></label>
+    <input
+      type="range"
+      min={spec.min}
+      max={spec.max}
+      step={spec.step}
+      value={safeValue}
+      onChange={(event) => onChange(Number.parseFloat(event.target.value))}
+    />
+  </div>;
+}
+
+function DynamicEffectColorField({ value, spec, onChange }: { value: string; spec: ColorParameterDefinition; onChange: (value: string) => void }) {
+  return <div className="setting-line"><label>{spec.label}</label><input className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
+}
+
+function DynamicEffectToggleField({ value, spec, onChange }: { value: boolean; spec: ToggleParameterDefinition; onChange: (value: boolean) => void }) {
+  return <div className="setting-line"><label>{spec.label}</label><VisibilityToggle visible={value} onChange={onChange} /></div>;
+}
+
+function DynamicEffectSelectField({ value, spec, onChange }: { value: string; spec: SelectParameterDefinition; onChange: (value: string) => void }) {
+  return <div className="setting-line"><label>{spec.label}</label><div className="segmented">{spec.options.map((option) => <button key={option.value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
+}
+
+function DynamicEffectParameterRows({ definitions, values, onChange }: {
+  definitions: readonly DynamicEffectParameterDefinition[];
+  values: DynamicEffectParameters;
+  onChange: (next: DynamicEffectParameters) => void;
+}) {
+  const validateColor = (definition: ColorParameterDefinition) => {
+    const value = values[definition.key];
+    return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : definition.defaultValue;
+  };
+  const validateBoolean = (definition: ToggleParameterDefinition) => {
+    const value = values[definition.key];
+    return typeof value === "boolean" ? value : definition.defaultValue;
+  };
+  const validateRange = (definition: RangeParameterDefinition) => {
+    const value = values[definition.key];
+    const numericValue = typeof value === "number" && Number.isFinite(value) ? value : definition.defaultValue;
+    return Math.max(definition.min, Math.min(definition.max, definition.integer ? Math.round(numericValue) : numericValue));
+  };
+  const validateSelection = (definition: SelectParameterDefinition) => {
+    const value = values[definition.key];
+    const candidates = new Set(definition.options.map((option) => option.value));
+    return typeof value === "string" && candidates.has(value) ? value : definition.defaultValue;
+  };
+
+  return <>
+    {definitions.map((definition) => {
+      switch (definition.kind) {
+        case DYNAMIC_EFFECT_PARAMETER_LABELS.range: {
+          const spec = definition as RangeParameterDefinition;
+          const rangeValue = validateRange(spec);
+          return <DynamicEffectRangeField
+            key={definition.key}
+            value={rangeValue}
+            spec={spec}
+            onChange={(value) => onChange({ ...values, [definition.key]: value })}
+          />;
+        }
+        case DYNAMIC_EFFECT_PARAMETER_LABELS.color:
+        {
+          const colorSpec = definition as ColorParameterDefinition;
+          return <DynamicEffectColorField
+            key={definition.key}
+            value={validateColor(colorSpec)}
+            spec={colorSpec}
+            onChange={(value) => onChange({ ...values, [definition.key]: value })}
+          />;
+        }
+        case DYNAMIC_EFFECT_PARAMETER_LABELS.toggle:
+        {
+          const toggleSpec = definition as ToggleParameterDefinition;
+          return <DynamicEffectToggleField
+            key={definition.key}
+            value={validateBoolean(toggleSpec)}
+            spec={toggleSpec}
+            onChange={(value) => onChange({ ...values, [definition.key]: value })}
+          />;
+        }
+        case DYNAMIC_EFFECT_PARAMETER_LABELS.select:
+        {
+          const selectSpec = definition as SelectParameterDefinition;
+          return <DynamicEffectSelectField
+            key={definition.key}
+            value={validateSelection(selectSpec)}
+            spec={selectSpec}
+            onChange={(value) => onChange({ ...values, [definition.key]: value })}
+          />;
+        }
+        default:
+          return null;
+      }
+    })}
+  </>;
+}
+
+type DynamicBackground = Extract<Background, { type: "dynamic" }>;
+type DynamicEffectProfiles = NonNullable<SyncedSettings["dynamicEffectProfiles"]>;
+type DynamicEffectProfile = NonNullable<DynamicEffectProfiles[DynamicEffect]>;
+
+function normalizeDynamicAngle(angle: number): number {
+  const safe = Number.isFinite(angle) ? angle : 0;
+  const wrapped = safe % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
+function normalizeDynamicBackground(background: DynamicBackground): DynamicBackground {
+  return {
+    ...background,
+    angle: normalizeDynamicAngle(background.angle),
+    speed: normalizeDynamicSpeed(background.effect, background.speed),
+    parameters: normalizeDynamicParameters(background.effect, background.parameters)
+  };
+}
+
+function profileFromDynamicBackground(background: DynamicBackground): DynamicEffectProfile {
+  const normalized = normalizeDynamicBackground(background);
+  return {
+    from: normalized.from,
+    to: normalized.to,
+    angle: normalized.angle,
+    speed: normalized.speed,
+    parameters: normalized.parameters
+  };
+}
+
+function baselineDynamicBackground(
+  from: Background,
+  effect: DynamicEffect,
+  profiles: DynamicEffectProfiles = {}
+): DynamicBackground {
+  const definition = getDynamicEffectDefinition(effect);
+  if (from.type === "dynamic" && from.effect === effect) {
+    return normalizeDynamicBackground(from);
+  }
+  const savedProfile = profiles[effect];
+  if (savedProfile) {
+    return {
+      type: "dynamic",
+      effect,
+      from: savedProfile.from,
+      to: savedProfile.to,
+      angle: normalizeDynamicAngle(savedProfile.angle),
+      speed: normalizeDynamicSpeed(effect, savedProfile.speed),
+      parameters: normalizeDynamicParameters(effect, savedProfile.parameters)
+    };
+  }
+  const source = from.type === "solid"
+    ? { from: from.color, to: "#13242a", angle: 145 }
+    : { from: from.from, to: from.to, angle: from.angle };
+
+  return {
+    type: "dynamic",
+    effect,
+    from: source.from,
+    to: source.to,
+    angle: normalizeDynamicAngle(source.angle),
+    speed: definition.speed.defaultValue,
+    parameters: normalizeDynamicParameters(effect, definition.defaultParameters)
+  };
+}
+
 function SearchTextPicker({ value, onChange }: { value: ClockPosition; onChange: (value: ClockPosition) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
@@ -354,6 +565,9 @@ export function AppShell(props: Props) {
     () => deriveFolderTheme(state.settings.background, state.settings.foreground.color),
     [state.settings.background, state.settings.foreground.color]
   );
+  const activeBackground = state.settings.background.type === "dynamic"
+    ? normalizeDynamicBackground(state.settings.background)
+    : state.settings.background;
   const remoteOperationActive = state.tokenConfigured && (
     state.sync.phase === "uploading" || state.sync.phase === "discovering" || state.sync.phase === "restoring"
   );
@@ -489,7 +703,25 @@ export function AppShell(props: Props) {
     if (item.url !== undefined && canOpenBookmark(item.url)) props.onOpenBookmark(item.url);
   };
   const updateSettings = (settings: SyncedSettings) => props.onSaveSettings?.(settings);
-  const setBackground = (background: SyncedSettings["background"]) => updateSettings({ ...state.settings, background });
+  const setBackground = (background: SyncedSettings["background"]) => {
+    const dynamicEffectProfiles: DynamicEffectProfiles = { ...(state.settings.dynamicEffectProfiles ?? {}) };
+    const nextBackground = background.type === "dynamic" ? normalizeDynamicBackground(background) : background;
+    if (state.settings.background.type === "dynamic") {
+      dynamicEffectProfiles[state.settings.background.effect] = profileFromDynamicBackground(state.settings.background);
+    }
+    if (nextBackground.type === "dynamic") {
+      dynamicEffectProfiles[nextBackground.effect] = profileFromDynamicBackground(nextBackground);
+    }
+    updateSettings({ ...state.settings, background: nextBackground, dynamicEffectProfiles });
+  };
+  const updateGradientBackground = (
+    patch: Partial<Omit<Extract<Background, { type: "gradient" }>, "type">>
+  ) => {
+    const current = state.settings.background;
+    if (current.type !== "gradient") return;
+    setBackground({ ...current, ...patch });
+  };
+
   const gridWidth = gridFit.columns * gridFit.columnWidth + (gridFit.columns - 1) * gridFit.gap;
   const contentFrameStyle = contentBounds ? { width: contentBounds.width, marginLeft: contentBounds.left } : undefined;
   const searchResultStyle = contentBounds ? {
@@ -498,13 +730,13 @@ export function AppShell(props: Props) {
   } : undefined;
 
   return (
-    <main className={`app theme-${state.settings.features.themeMode} bookmarks-${state.settings.layout.bookmarkAlignment} hover-${state.settings.features.hoverStyle} ${state.settings.background.type === "dynamic" ? "background-dynamic" : ""}`} style={{
-      backgroundColor: state.settings.background.type === "solid"
-        ? state.settings.background.color
-        : state.settings.background.type === "dynamic"
-          ? `color-mix(in oklab, ${state.settings.background.from} 50%, ${state.settings.background.to})`
-          : state.settings.background.from,
-      backgroundImage: backgroundImageCss(state.settings),
+    <main className={`app theme-${state.settings.features.themeMode} bookmarks-${state.settings.layout.bookmarkAlignment} hover-${state.settings.features.hoverStyle} ${activeBackground.type === "dynamic" ? "background-dynamic" : ""}`} style={{
+      backgroundColor: activeBackground.type === "solid"
+        ? activeBackground.color
+        : activeBackground.type === "dynamic"
+          ? `color-mix(in oklab, ${activeBackground.from} 50%, ${activeBackground.to})`
+          : activeBackground.from,
+      backgroundImage: backgroundImageCss(activeBackground),
       color: state.settings.foreground.color,
       "--foreground-color": state.settings.foreground.color,
       "--bookmark-font-size": `${state.settings.foreground.fontSize}px`,
@@ -520,7 +752,7 @@ export function AppShell(props: Props) {
       "--folder-hover": folderTheme.hover,
       "--folder-shadow": folderTheme.shadow
     } as CSSProperties} onClick={() => setOpenFolder(null)}>
-      {state.settings.background.type === "dynamic" && <DynamicBackground background={state.settings.background} />}
+      {activeBackground.type === "dynamic" && <DynamicBackground background={activeBackground} />}
       <div className="scanlines" />
 
       <div
@@ -610,11 +842,45 @@ export function AppShell(props: Props) {
 
           <section className="settings-section">
             <div className="section-title"><span>BACKGROUND</span></div>
-            <div className="setting-line"><label>Mode</label><div className="segmented"><button className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from })}>SOLID</button><button className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle })}>GRADIENT</button><button className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground({ type: "dynamic", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle, speed: state.settings.background.type === "dynamic" ? state.settings.background.speed : 10 })}>DYNAMIC</button></div></div>
-            {state.settings.background.type === "solid" ? <div className="setting-line"><label>Color</label><input className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div> : (() => {
-              const gradient = state.settings.background;
-              return <><div className="setting-line"><label>Colors</label><div className="color-pair"><input type="color" value={gradient.from} onChange={(event) => setBackground({ ...gradient, from: event.target.value })} /><input type="color" value={gradient.to} onChange={(event) => setBackground({ ...gradient, to: event.target.value })} /></div></div><div className="setting-line angle-line"><label>Angle <b>{gradient.angle}°</b></label><input type="range" min="0" max="360" value={gradient.angle} onChange={(event) => setBackground({ ...gradient, angle: Number(event.target.value) })} /></div>{gradient.type === "dynamic" && <div className="setting-line size-line speed-line"><label>Speed <b>{gradient.speed}</b></label><input type="range" min="10" max="20" step="1" value={gradient.speed} onChange={(event) => setBackground({ ...gradient, speed: Number(event.target.value) })} /></div>}</>;
-            })()}
+            <div className="setting-line"><label>Mode</label><div className="segmented"><button className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from })}>SOLID</button><button className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle })}>GRADIENT</button><button className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
+            {state.settings.background.type === "solid" ? (
+              <div className="setting-line"><label>Color</label><input className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div>
+            ) : activeBackground.type === "dynamic" ? (
+              (() => {
+                const dynamicBackground = activeBackground;
+                const effectDefinition = getDynamicEffectDefinition(dynamicBackground.effect);
+                const parameters = normalizeDynamicParameters(dynamicBackground.effect, dynamicBackground.parameters);
+                return <>
+                  <div className="setting-line"><label>Effect</label><DynamicEffectPicker
+                    value={dynamicBackground.effect}
+                    onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
+                  /></div>
+                  <div className="setting-line"><label>Colors</label><div className="color-pair"><input type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>
+                  {effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
+                  <div className="setting-line size-line speed-line">
+                    <label>Speed <b>{dynamicBackground.speed}</b></label>
+                    <input
+                      type="range"
+                      min={effectDefinition.speed.min}
+                      max={effectDefinition.speed.max}
+                      step={effectDefinition.speed.step}
+                      value={dynamicBackground.speed}
+                      onChange={(event) => setBackground({ ...dynamicBackground, speed: Number(event.target.value) })}
+                    />
+                  </div>
+                  <DynamicEffectParameterRows
+                    definitions={effectDefinition.parameters}
+                    values={parameters}
+                    onChange={(nextParameters) => setBackground({ ...dynamicBackground, parameters: nextParameters })}
+                  />
+                </>;
+              })()
+            ) : (
+              <div>
+                <div className="setting-line"><label>Colors</label><div className="color-pair"><input type="color" value={state.settings.background.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input type="color" value={state.settings.background.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
+                <div className="setting-line angle-line"><label>Angle <b>{state.settings.background.angle}°</b></label><input type="range" min="0" max="360" value={state.settings.background.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
+              </div>
+            )}
           </section>
 
           <section className="settings-section">

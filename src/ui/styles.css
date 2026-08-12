@@ -20,6 +20,7 @@ button { color: inherit; }
 .app.background-dynamic { background-repeat: no-repeat; }
 .app.background-dynamic::before { background: none; }
 .dynamic-background { position: fixed; z-index: 0; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.dynamic-background.dynamic-background-interactive { pointer-events: auto; }
 .scanlines { position: absolute; z-index: 1; inset: 0; opacity: .07; pointer-events: none; background: repeating-linear-gradient(180deg, transparent 0, transparent 3px, rgba(255,255,255,.025) 4px); }
 
 .center-stage { position: relative; z-index: 2; width: var(--grid-width, 885px); flex: 0 0 var(--grid-width, 885px); margin-block: auto; margin-inline: max(0px, calc((100vw - var(--grid-width, 885px)) / 2 - 24px)); padding: 64px 0; }
@@ -90,15 +91,15 @@ button { color: inherit; }
 .bookmarks-left .folder-row { justify-content: flex-start; text-align: left; }
 .bookmarks-center .folder-row { justify-content: center; text-align: center; }
 .bookmarks-right .folder-row { justify-content: flex-end; text-align: right; }
-.folder-row-content { min-width: 0; max-width: 100%; display: inline-flex; align-items: baseline; gap: 3px; }
+.folder-row-content { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 3px; }
 .folder-entry.is-expanded > .folder-row,
 .folder-entry.is-expanded > .folder-list { color: var(--foreground-color, #e8f0ed); background: var(--folder-hover); }
 .folder-row:hover { color: var(--foreground-color, #e8f0ed); background: var(--folder-hover); }
 .folder-row:disabled { opacity: .32; cursor: not-allowed; }
-.row-mark { flex: 0 0 auto; width: 16px; height: 16px; color: #5fc9b1; display: inline-flex; align-items: center; justify-content: center; }
-.row-mark svg { display: block; }
-.row-title { min-width: 0; overflow: hidden; font-size: max(7px, calc(var(--bookmark-font-size, 11px) - 1px)); text-overflow: ellipsis; white-space: nowrap; }
-.row-count { flex: 0 0 auto; color: rgba(145,188,178,.42); font-size: 8px; }
+.row-mark { flex: 0 0 16px; width: 16px; height: 16px; color: #5fc9b1; display: inline-grid; place-items: center; line-height: 0; }
+.row-mark svg { display: block; width: 16px; height: 16px; }
+.row-title { min-width: 0; overflow: hidden; font-size: max(7px, calc(var(--bookmark-font-size, 11px) - 1px)); line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.row-count { flex: 0 0 auto; color: rgba(145,188,178,.42); font-size: 8px; line-height: 16px; }
 .folder-entry .folder-list { margin-left: 0; }
 .folder-empty { padding: 18px 10px; color: rgba(154,193,183,.35); font-size: 8px; text-align: center; letter-spacing: .15em; }
 
@@ -117,30 +118,27 @@ button { color: inherit; }
 .empty.compact { padding: 11px 0; text-align: left; }
 .status-dock {
   position: fixed;
-  left: 10px;
-  bottom: 10px;
+  left: 16px;
+  bottom: 16px;
   z-index: 31;
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   max-width: min(440px, calc(100vw - 32px));
   display: inline-flex;
   align-items: center;
-  padding-left: 6px;
+  padding: 0;
   overflow: hidden;
   color: var(--foreground-color, #e8f0ed);
   border: 1px solid transparent;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  transition: width 160ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
 }
 
 .status-dock.has-notification {
   width: max-content;
   height: 32px;
-  left: 16px;
-  bottom: 16px;
-  padding-left: 0;
   border-color: color-mix(in srgb, var(--foreground-color, #e8f0ed) 22%, transparent);
   background: color-mix(in srgb, var(--folder-surface) 92%, transparent);
   box-shadow: inset 0 -2px #59d5b8, 0 12px 34px var(--folder-shadow), 0 0 0 1px color-mix(in srgb, var(--foreground-color, #e8f0ed) 5%, transparent);
@@ -161,6 +159,8 @@ button { color: inherit; }
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
+  position: relative;
+  z-index: 1;
   transition: opacity 100ms ease, color 120ms ease;
 }
 
@@ -601,8 +601,12 @@ button { color: inherit; }
 .picker-menu { position: absolute; z-index: 30; top: calc(100% + 3px); right: 0; width: 100%; padding: 3px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; background: #0c171b; box-shadow: 0 10px 30px rgba(0,0,0,.48), 0 0 0 1px rgba(91,200,175,.16); }
 .picker-menu button { height: 24px; border: 0; color: rgba(190,218,211,.54); background: transparent; font-size: 8px; cursor: pointer; }
 .picker-menu button:hover, .picker-menu button.selected { color: #8be2ce; background: rgba(84,210,180,.11); }
+.picker-menu button:disabled { cursor: not-allowed; color: rgba(190, 218, 211, 0.32); background: transparent; }
+.picker-menu button:disabled:hover,
+.picker-menu button:disabled.selected { color: rgba(190, 218, 211, 0.32); background: transparent; }
 .picker-menu.clock-menu { grid-template-columns: 1fr 1fr; width: 100%; }
 .picker-menu.alignment-menu { grid-template-columns: repeat(3, 1fr); width: 100%; }
+.picker-menu.effect-menu { grid-template-columns: 1fr 1fr; width: var(--control-two, 132px); }
 .token-row { display: grid; grid-template-columns: 1fr auto; gap: 5px; }
 .token-row input { min-width: 0; height: 29px; padding: 0 8px; border: 1px solid rgba(112,179,163,.14); outline: 0; color: #dceae6; background: rgba(255,255,255,.025); font-size: 8px; }
 .token-row input:focus { border-color: rgba(86,203,176,.42); }

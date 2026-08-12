@@ -5,8 +5,17 @@ import {
   canonicalSnapshot,
   type SyncNote,
   type BookmarkItem,
+  type DynamicEffectProfiles,
   type Snapshot
 } from "./model";
+import {
+  getDynamicEffectSpeed,
+  isDynamicEffectInput,
+  isDynamicEffect,
+  normalizeDynamicEffect,
+  normalizeDynamicParameters,
+  normalizeDynamicSpeed
+} from "./dynamicEffects";
 
 const encoder = new TextEncoder();
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -105,9 +114,54 @@ export function validateSnapshot(input: unknown): Snapshot {
   if ((background.type === "gradient" || background.type === "dynamic") && (
     typeof background.angle !== "number" || background.angle < 0 || background.angle > 360
   )) throw new SnapshotValidationError("Invalid gradient settings");
-  if (background.type === "dynamic" && (
-    typeof background.speed !== "number" || !Number.isInteger(background.speed) || background.speed < 10 || background.speed > 20
-  )) throw new SnapshotValidationError("Invalid dynamic background speed");
+  if (background.type === "dynamic") {
+    if (background.effect !== undefined && !isDynamicEffectInput(background.effect)) {
+      throw new SnapshotValidationError("Invalid dynamic background effect");
+    }
+    const effect = normalizeDynamicEffect(background.effect);
+    const speedSpec = getDynamicEffectSpeed(effect);
+    const speed = background.speed;
+    if (typeof speed !== "number" || !Number.isFinite(speed)) throw new SnapshotValidationError("Invalid dynamic background speed");
+    if ((speedSpec.integer && !Number.isInteger(speed)) || speed < speedSpec.min || speed > speedSpec.max) {
+      throw new SnapshotValidationError("Invalid dynamic background speed");
+    }
+  }
+  const parseDynamicEffectProfiles = (input: unknown): DynamicEffectProfiles => {
+    if (input === undefined) return {};
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new SnapshotValidationError("Invalid dynamic effect profiles");
+    }
+    const profiles: DynamicEffectProfiles = {};
+    for (const [effectInput, rawProfile] of Object.entries(input as Record<string, unknown>)) {
+      if (!isDynamicEffectInput(effectInput)) throw new SnapshotValidationError("Invalid dynamic effect profile id");
+      if (!rawProfile || typeof rawProfile !== "object" || Array.isArray(rawProfile)) {
+        throw new SnapshotValidationError("Invalid dynamic effect profile");
+      }
+      const profile = rawProfile as Record<string, unknown>;
+      if (typeof profile.from !== "string" || !HEX_COLOR.test(profile.from) ||
+        typeof profile.to !== "string" || !HEX_COLOR.test(profile.to) ||
+        typeof profile.angle !== "number" || !Number.isFinite(profile.angle) || profile.angle < 0 || profile.angle > 360) {
+        throw new SnapshotValidationError("Invalid dynamic effect profile colors or angle");
+      }
+      const effect = normalizeDynamicEffect(effectInput);
+      const isCanonical = isDynamicEffect(effectInput);
+      if (!isCanonical && profiles[effect] !== undefined) continue;
+      const speedSpec = getDynamicEffectSpeed(effect);
+      if (typeof profile.speed !== "number" || !Number.isFinite(profile.speed) ||
+        (speedSpec.integer && !Number.isInteger(profile.speed)) || profile.speed < speedSpec.min || profile.speed > speedSpec.max) {
+        throw new SnapshotValidationError("Invalid dynamic effect profile speed");
+      }
+      profiles[effect] = {
+        from: profile.from,
+        to: profile.to,
+        angle: profile.angle,
+        speed: normalizeDynamicSpeed(effect, profile.speed),
+        parameters: normalizeDynamicParameters(effect, profile.parameters)
+      };
+    }
+    return profiles;
+  };
+  const dynamicEffectProfiles = parseDynamicEffectProfiles(config.dynamicEffectProfiles);
   const foreground = config.foreground as Record<string, unknown> | undefined;
   if (!foreground || (
     typeof foreground.color !== "string" || !HEX_COLOR.test(foreground.color) ||
@@ -237,11 +291,17 @@ export function validateSnapshot(input: unknown): Snapshot {
             angle: background.angle as number
           } : {
             type: "dynamic" as const,
+            effect: normalizeDynamicEffect(background.effect),
             from: background.from as string,
             to: background.to as string,
             angle: background.angle as number,
-            speed: background.speed as number
+            speed: normalizeDynamicSpeed(normalizeDynamicEffect(background.effect), background.speed as number),
+            parameters: normalizeDynamicParameters(
+              normalizeDynamicEffect(background.effect),
+              background.parameters
+            )
           },
+      dynamicEffectProfiles,
       foreground: { color: foreground.color as string, fontSize: foreground.fontSize as number },
       layout: { rows: layout.rows as number, columns: layout.columns as number, bookmarkAlignment },
       clockPosition,

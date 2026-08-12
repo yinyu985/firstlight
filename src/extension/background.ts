@@ -13,6 +13,12 @@ import {
   eastEightTimestamp,
   settingsFromSnapshot
 } from "../shared/model";
+import {
+  isDynamicSpeedValid,
+  normalizeDynamicEffect,
+  normalizeDynamicParameters,
+  normalizeDynamicSpeed
+} from "../shared/dynamicEffects";
 import type { AppState, ExtensionRequest, ExtensionResponse, StoredState } from "../shared/protocol";
 import { SnapshotValidationError, snapshotHash, validateSnapshot } from "../shared/snapshot";
 import { canAutoUpload, decideSyncWithRevision } from "../shared/sync-decision";
@@ -462,20 +468,30 @@ async function initialize(): Promise<void> {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   memory = (stored[STORAGE_KEY] as StoredState | undefined) ?? {};
   memory.settings ??= DEFAULT_SETTINGS;
-  if (memory.settings.background.type === "dynamic" && (
-    !Number.isFinite(memory.settings.background.angle) ||
-    !Number.isInteger(memory.settings.background.speed) ||
-    memory.settings.background.speed < 10 || memory.settings.background.speed > 20
-  )) {
-    memory.settings = {
-      ...memory.settings,
-      background: {
-        ...memory.settings.background,
-        angle: Number.isFinite(memory.settings.background.angle) ? memory.settings.background.angle : 145,
-        speed: 10
-      }
-    };
-    await saveMemory();
+  if (memory.settings.background.type === "dynamic") {
+    const normalizedEffect = normalizeDynamicEffect(memory.settings.background.effect);
+    const normalizedSpeed = normalizeDynamicSpeed(normalizedEffect, memory.settings.background.speed);
+    const normalizedParameters = normalizeDynamicParameters(normalizedEffect, memory.settings.background.parameters);
+    const migrated =
+      !isDynamicSpeedValid(normalizedEffect, memory.settings.background.speed) ||
+      !Number.isFinite(memory.settings.background.angle) ||
+      normalizedEffect !== memory.settings.background.effect ||
+      normalizedSpeed !== memory.settings.background.speed ||
+      JSON.stringify(memory.settings.background.parameters ?? {}) !== JSON.stringify(normalizedParameters);
+
+    if (migrated) {
+      memory.settings = {
+        ...memory.settings,
+        background: {
+          ...memory.settings.background,
+          effect: normalizedEffect,
+          angle: Number.isFinite(memory.settings.background.angle) ? memory.settings.background.angle : 145,
+          speed: normalizedSpeed,
+          parameters: normalizedParameters
+        }
+      };
+      await saveMemory();
+    }
   }
   if (memory.settings.layout.bookmarkAlignment !== "left" &&
     memory.settings.layout.bookmarkAlignment !== "center" &&
