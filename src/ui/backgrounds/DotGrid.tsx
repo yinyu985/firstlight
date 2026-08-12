@@ -1,11 +1,4 @@
 import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "react";
-import { gsap } from "gsap";
-import { InertiaPlugin } from "gsap/InertiaPlugin";
-
-const hasInertiaPlugin = Boolean(InertiaPlugin);
-if (hasInertiaPlugin) {
-  gsap.registerPlugin(InertiaPlugin);
-}
 
 export type DotGridParameters = {
   dotSize?: number;
@@ -24,7 +17,14 @@ interface Dot {
   cy: number;
   xOffset: number;
   yOffset: number;
-  _inertiaApplied: boolean;
+  velocityX: number;
+  velocityY: number;
+  resistance: number;
+  returnDuration: number;
+  returnElapsed: number;
+  returnStartX: number;
+  returnStartY: number;
+  phase: "idle" | "inertia" | "return";
 }
 
 export type DotGridRuntimeConfig = {
@@ -105,6 +105,101 @@ export function dotGridShockImpulse(
   };
 }
 
+export function dotGridInertiaStep(
+  speed: number,
+  resistance: number,
+  deltaSeconds: number
+): { distance: number; speed: number; movingTime: number } {
+  const initialSpeed = Math.max(0, speed);
+  const drag = Math.max(1, resistance);
+  const frameTime = clampValue(deltaSeconds, 0, 1 / 20);
+  const movingTime = Math.min(frameTime, initialSpeed / drag);
+  const nextSpeed = Math.max(0, initialSpeed - drag * movingTime);
+  return {
+    distance: ((initialSpeed + nextSpeed) * movingTime) / 2,
+    speed: nextSpeed,
+    movingTime
+  };
+}
+
+export function dotGridReturnProgress(elapsedSeconds: number, returnDuration: number): number {
+  return clampValue(elapsedSeconds / Math.max(0.001, returnDuration), 0, 1);
+}
+
+function elasticOut(progress: number): number {
+  if (progress === 0 || progress === 1) return progress;
+  return Math.pow(2, -10 * progress) * Math.sin(((progress * 10 - 0.75) * Math.PI * 2) / 3) + 1;
+}
+
+function beginDotReturn(dot: Dot): void {
+  dot.phase = "return";
+  dot.velocityX = 0;
+  dot.velocityY = 0;
+  dot.returnElapsed = 0;
+  dot.returnStartX = dot.xOffset;
+  dot.returnStartY = dot.yOffset;
+}
+
+function settleDot(dot: Dot): void {
+  dot.xOffset = 0;
+  dot.yOffset = 0;
+  dot.velocityX = 0;
+  dot.velocityY = 0;
+  dot.phase = "idle";
+}
+
+function advanceDotMotion(dot: Dot, deltaSeconds: number): void {
+  let remainingTime = deltaSeconds;
+
+  if (dot.phase === "inertia") {
+    const speed = Math.hypot(dot.velocityX, dot.velocityY);
+    if (speed <= 0.01) {
+      beginDotReturn(dot);
+    } else {
+      const step = dotGridInertiaStep(speed, dot.resistance, remainingTime);
+      dot.xOffset += (dot.velocityX / speed) * step.distance;
+      dot.yOffset += (dot.velocityY / speed) * step.distance;
+      if (step.speed > 0.01) {
+        const speedRatio = step.speed / speed;
+        dot.velocityX *= speedRatio;
+        dot.velocityY *= speedRatio;
+        return;
+      }
+      remainingTime = Math.max(0, remainingTime - step.movingTime);
+      beginDotReturn(dot);
+    }
+  }
+
+  if (dot.phase === "return") {
+    dot.returnElapsed += remainingTime;
+    const progress = dotGridReturnProgress(dot.returnElapsed, dot.returnDuration);
+    const remaining = 1 - elasticOut(progress);
+    dot.xOffset = dot.returnStartX * remaining;
+    dot.yOffset = dot.returnStartY * remaining;
+    if (progress >= 1) settleDot(dot);
+  }
+}
+
+function applyDotImpulse(
+  dot: Dot,
+  impulseX: number,
+  impulseY: number,
+  resistance: number,
+  returnDuration: number,
+  maxSpeed: number
+): void {
+  const rawSpeed = Math.hypot(impulseX, impulseY);
+  if (rawSpeed <= 0.01) return;
+
+  const speed = Math.min(rawSpeed, maxSpeed);
+  const speedRatio = speed / rawSpeed;
+  dot.velocityX = impulseX * speedRatio;
+  dot.velocityY = impulseY * speedRatio;
+  dot.resistance = resistance;
+  dot.returnDuration = returnDuration;
+  dot.phase = "inertia";
+}
+
 export interface DotGridProps {
   className?: string;
   from?: string;
@@ -147,24 +242,6 @@ export function DotGrid({
     speedScale: 1
   });
 
-  const buildImpulse = useCallback((pushX: number, pushY: number, resistanceValue: number) => {
-    if (hasInertiaPlugin) {
-      return {
-        inertia: {
-          xOffset: pushX,
-          yOffset: pushY,
-          resistance: resistanceValue
-        }
-      };
-    }
-    return {
-      xOffset: pushX,
-      yOffset: pushY,
-      duration: 0.35,
-      ease: "power2.out"
-    };
-  }, []);
-
   const baseColor = from ?? "#102030";
   const activeColor = to ?? "#89f7ff";
 
@@ -196,7 +273,7 @@ export function DotGrid({
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
 
-      const { width, height } = wrap.getBoundingClientRect();
+    const { width, height } = wrap.getBoundingClientRect();
     if (width <= 0 || height <= 0) {
       dotsRef.current = [];
       sizeRef.current = { width: 0, height: 0, dpr: 1 };
@@ -232,7 +309,14 @@ export function DotGrid({
           cy: startY + y * cell,
           xOffset: 0,
           yOffset: 0,
-          _inertiaApplied: false
+          velocityX: 0,
+          velocityY: 0,
+          resistance: runtimeRef.current.resistance,
+          returnDuration: runtimeRef.current.returnDuration,
+          returnElapsed: 0,
+          returnStartX: 0,
+          returnStartY: 0,
+          phase: "idle"
         });
       }
     }
@@ -264,13 +348,14 @@ export function DotGrid({
     let rafId = 0;
     let disposed = false;
     let frameQueued = false;
+    let lastFrameTime = 0;
     isDocumentHidden.current = typeof document !== "undefined" ? document.hidden : false;
     const schedule = () => {
       if (disposed || isDocumentHidden.current || frameQueued) return;
       frameQueued = true;
-      rafId = requestAnimationFrame(() => {
+      rafId = requestAnimationFrame((frameTime) => {
         frameQueued = false;
-        draw();
+        draw(frameTime);
       });
     };
     requestDrawRef.current = schedule;
@@ -278,11 +363,12 @@ export function DotGrid({
     const onVisibility = () => {
       isDocumentHidden.current = document.hidden;
       if (!disposed && !document.hidden) {
+        lastFrameTime = 0;
         schedule();
       }
     };
 
-    const draw = () => {
+    const draw = (frameTime: number) => {
       if (disposed) return;
 
       if (isDocumentHidden.current) {
@@ -304,12 +390,15 @@ export function DotGrid({
       if (width <= 0 || height <= 0) {
         return;
       }
+      const deltaSeconds = lastFrameTime ? Math.min((frameTime - lastFrameTime) / 1000, 1 / 20) : 0;
+      lastFrameTime = frameTime;
       context.clearRect(0, 0, width, height);
       const { x: px, y: py } = pointerRef.current;
       const currentProximity = runtimeRef.current.proximity;
       const proxSq = currentProximity * currentProximity;
 
       for (const dot of dotsRef.current) {
+        advanceDotMotion(dot, deltaSeconds);
         const ox = dot.cx + dot.xOffset;
         const oy = dot.cy + dot.yOffset;
         const dx = dot.cx - px;
@@ -373,6 +462,18 @@ export function DotGrid({
       const settings = runtimeRef.current;
       const now = performance.now();
       const state = pointerRef.current;
+      const rect = wrapper.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      state.x = event.clientX - rect.left;
+      state.y = event.clientY - rect.top;
+
+      if (!state.lastTime) {
+        state.lastTime = now;
+        state.lastX = event.clientX;
+        state.lastY = event.clientY;
+        return;
+      }
+
       const delta = state.lastTime ? Math.max(4, now - state.lastTime) : 16;
       const dx = event.clientX - state.lastX;
       const dy = event.clientY - state.lastY;
@@ -396,33 +497,15 @@ export function DotGrid({
       state.vy = vy;
       state.speed = currentSpeed;
 
-      const rect = wrapper.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      state.x = event.clientX - rect.left;
-      state.y = event.clientY - rect.top;
-
       const maxRange = Math.max(0, Math.min(2000, settings.proximity));
       const trigger = Math.max(1, settings.speedTrigger);
 
       for (const dot of dotsRef.current) {
         const distance = Math.hypot(dot.cx - state.x, dot.cy - state.y);
-        if (currentSpeed > trigger && distance < maxRange && !dot._inertiaApplied) {
-          dot._inertiaApplied = true;
-          gsap.killTweensOf(dot);
+        if (currentSpeed > trigger && distance < maxRange && dot.phase === "idle") {
           const pushX = dot.cx - state.x + state.vx * 0.005;
           const pushY = dot.cy - state.y + state.vy * 0.005;
-          gsap.to(dot, {
-            ...buildImpulse(pushX, pushY, settings.resistance),
-            onComplete: () => {
-              gsap.to(dot, {
-                xOffset: 0,
-                yOffset: 0,
-                duration: runtimeRef.current.returnDuration,
-                ease: "elastic.out(1,0.75)"
-              });
-              dot._inertiaApplied = false;
-            }
-          });
+          applyDotImpulse(dot, pushX, pushY, settings.resistance, settings.returnDuration, settings.maxSpeed);
         }
       }
     };
@@ -436,21 +519,8 @@ export function DotGrid({
       for (const dot of dotsRef.current) {
         const distance = Math.hypot(dot.cx - clickX, dot.cy - clickY);
         const impulse = dotGridShockImpulse(dot.cx - clickX, dot.cy - clickY, distance, settings);
-        if (impulse && !dot._inertiaApplied) {
-          dot._inertiaApplied = true;
-          gsap.killTweensOf(dot);
-          gsap.to(dot, {
-            ...buildImpulse(impulse.x, impulse.y, impulse.resistance),
-            onComplete: () => {
-              gsap.to(dot, {
-                xOffset: 0,
-                yOffset: 0,
-                duration: impulse.returnDuration,
-                ease: "elastic.out(1,0.75)"
-              });
-              dot._inertiaApplied = false;
-            }
-          });
+        if (impulse && dot.phase === "idle") {
+          applyDotImpulse(dot, impulse.x, impulse.y, impulse.resistance, impulse.returnDuration, settings.maxSpeed);
         }
       }
     };
@@ -468,9 +538,8 @@ export function DotGrid({
     return () => {
       window.removeEventListener("pointermove", throttledMove as EventListener);
       window.removeEventListener("pointerdown", onPointerDown);
-      gsap.killTweensOf(dotsRef.current);
     };
-  }, [buildImpulse]);
+  }, []);
 
 
   return (

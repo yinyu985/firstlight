@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.78",
-    "gsap": "^3.13.0",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/merge": "^6.10.2",
     "@codemirror/state": "^6.5.2",

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { dynamicTimeScale, hexToOklab } from "./DynamicBackground";
 import { resolveBalatroSettings } from "./backgrounds/Balatro";
-import { dotGridProximityMix, dotGridShockImpulse, resolveDotGridSettings } from "./backgrounds/DotGrid";
+import {
+  dotGridInertiaStep,
+  dotGridProximityMix,
+  dotGridReturnProgress,
+  dotGridShockImpulse,
+  resolveDotGridSettings
+} from "./backgrounds/DotGrid";
 import { resolveLiquidChromeSettings } from "./backgrounds/LiquidChrome";
 import { resolveTopographySettings } from "./backgrounds/Topography";
 
@@ -107,5 +113,12 @@ describe("Dynamic background", () => {
     expect(impulse?.x).toBeCloseTo(100 * 8 * (2 / 3));
     expect(impulse).toMatchObject({ y: 0, resistance: 1800, returnDuration: 3.25 });
     expect(dotGridShockImpulse(300, 0, 300, settings)).toBeNull();
+
+    const lowResistance = dotGridInertiaStep(1000, 150, 0.05);
+    const highResistance = dotGridInertiaStep(1000, 4000, 0.05);
+    expect(lowResistance.distance).toBeGreaterThan(highResistance.distance);
+    expect(lowResistance.speed).toBeGreaterThan(highResistance.speed);
+    expect(dotGridReturnProgress(0.5, 1)).toBe(0.5);
+    expect(dotGridReturnProgress(0.5, 2)).toBe(0.25);
   });
 });
