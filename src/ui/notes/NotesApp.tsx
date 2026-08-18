@@ -1,8 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, Check, Plus, Search, Trash2, X } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Check, Plus, Search, Trash2, X } from "lucide-react";
 import { formatNoteDate, useNotes } from "./useNotes";
-import type { NoteSortMode } from "./types";
 import type { SyncNote } from "../../shared/model";
+import { getNoteContentStats } from "./metrics";
 
 interface NotesSidebarProps {
   notes: {
@@ -19,8 +19,6 @@ interface NotesSidebarProps {
   onStartDelete: (noteId: string) => void;
   onConfirmDelete: (noteId: string) => void;
   onCancelDelete: () => void;
-  sortMode: NoteSortMode;
-  onSortModeChange: (mode: NoteSortMode) => void;
   readonly?: boolean;
 }
 
@@ -35,27 +33,13 @@ function NotesSidebar({
   onStartDelete,
   onConfirmDelete,
   onCancelDelete,
-  sortMode,
-  onSortModeChange,
   readonly = false
 }: NotesSidebarProps) {
-  const sortLabel = sortMode === "updated-desc" ? "Modified" : "Created";
-  const sortNext: NoteSortMode = sortMode === "updated-desc" ? "created-desc" : "updated-desc";
-
   return (
     <aside className="notes-sidebar">
       <header className="notes-sidebar-header">
         <div className="notes-sidebar-title">
           <h2>Notes</h2>
-          <button
-            type="button"
-            className="notes-sort-button"
-            onClick={() => onSortModeChange(sortNext)}
-            title={`Sort by ${sortNext === "updated-desc" ? "last modified" : "created"} time`}
-          >
-            <span className="notes-sort-label">{sortLabel}</span>
-            <ArrowUpDown className="notes-sort-icon" size={15} strokeWidth={1.7} aria-hidden="true" />
-          </button>
         </div>
       </header>
 
@@ -110,6 +94,27 @@ function NotesEmptyState() {
   );
 }
 
+const NOTES_SCROLLBAR_INSET = 2;
+const NOTES_SCROLLBAR_MAX_LENGTH = 20;
+
+interface NoteScrollbarState {
+  visible: boolean;
+  offset: number;
+  length: number;
+}
+
+function noteScrollbarState(element: HTMLTextAreaElement): NoteScrollbarState {
+  const scrollRange = element.scrollHeight - element.clientHeight;
+  const trackLength = Math.max(0, element.clientHeight - NOTES_SCROLLBAR_INSET * 2);
+  const length = Math.min(NOTES_SCROLLBAR_MAX_LENGTH, trackLength);
+  const travel = Math.max(0, trackLength - length);
+  return {
+    visible: scrollRange > 1 && length > 0,
+    offset: scrollRange > 0 ? (element.scrollTop / scrollRange) * travel : 0,
+    length
+  };
+}
+
 interface NotesEditorProps {
   selectedId: string | null;
   title: string;
@@ -132,36 +137,86 @@ function NotesEditor({
   readonly = false
 }: NotesEditorProps) {
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
+  const [scrollbar, setScrollbar] = useState<NoteScrollbarState>({ visible: false, offset: 0, length: NOTES_SCROLLBAR_MAX_LENGTH });
+  const contentStats = useMemo(() => getNoteContentStats(content), [content]);
 
   useEffect(() => {
     if (!selectedId) return;
     titleInputRef.current?.focus();
   }, [selectedId]);
 
+  useLayoutEffect(() => {
+    const area = contentRef.current;
+    if (!area) return;
+    const update = () => setScrollbar(noteScrollbarState(area));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, [selectedId, content]);
+
+  const dragScrollbar = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = scrollbarDragRef.current;
+    const area = contentRef.current;
+    if (!drag || !area || drag.pointerId !== event.pointerId) return;
+    const scrollRange = area.scrollHeight - area.clientHeight;
+    const trackLength = Math.max(0, area.clientHeight - NOTES_SCROLLBAR_INSET * 2);
+    const travel = trackLength - scrollbar.length;
+    if (travel > 0) area.scrollTop = drag.startScrollTop + ((event.clientY - drag.startY) / travel) * scrollRange;
+  };
+
   if (!selectedId) return <NotesEmptyState />;
 
   return (
-    <section className="notes-editor">
-      <input
-        ref={titleInputRef}
-        className="notes-title"
-        value={title}
-        placeholder="Untitled"
-        onChange={(event) => onTitleChange(event.target.value)}
-        aria-label="Note title"
-        readOnly={readonly}
-      />
-      <div className="notes-divider" />
-      <textarea
-        className="notes-content"
-        value={content}
-        placeholder="Start writing..."
-        onChange={(event) => onContentChange(event.target.value)}
-        aria-label="Note content"
-        readOnly={readonly}
-      />
-      <footer className="notes-meta">Last edited: {formatNoteDate(updatedAt)} · Created: {formatNoteDate(createdAt)}</footer>
-    </section>
+    <div className="notes-editor-column">
+      <section className="notes-editor">
+        <input
+          ref={titleInputRef}
+          className="notes-title"
+          value={title}
+          placeholder="Untitled"
+          onChange={(event) => onTitleChange(event.target.value)}
+          aria-label="Note title"
+          readOnly={readonly}
+        />
+        <div className="notes-divider" />
+        <div className="notes-content-wrap">
+          <textarea
+            ref={contentRef}
+            className="notes-content"
+            value={content}
+            placeholder="Start writing..."
+            onChange={(event) => onContentChange(event.target.value)}
+            onScroll={(event) => setScrollbar(noteScrollbarState(event.currentTarget))}
+            aria-label="Note content"
+            readOnly={readonly}
+          />
+          {scrollbar.visible && <div className="notes-scrollbar" aria-hidden="true">
+            <div
+              className="notes-scrollbar-thumb"
+              style={{ height: scrollbar.length, transform: `translateY(${scrollbar.offset}px)` }}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                scrollbarDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: contentRef.current?.scrollTop ?? 0 };
+              }}
+              onPointerMove={dragScrollbar}
+              onPointerUp={(event) => {
+                if (scrollbarDragRef.current?.pointerId === event.pointerId) scrollbarDragRef.current = null;
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }}
+              onPointerCancel={() => { scrollbarDragRef.current = null; }}
+            />
+          </div>}
+        </div>
+      </section>
+      <footer className="notes-statusbar">
+        <span className="notes-stats">Lines: {contentStats.lines} · Characters: {contentStats.characters} · Size: {contentStats.size}</span>
+        <span className="notes-meta">Last edited: {formatNoteDate(updatedAt)} · Created: {formatNoteDate(createdAt)}</span>
+      </footer>
+    </div>
   );
 }
 
@@ -185,11 +240,9 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
     searchQuery,
     draftTitle,
     draftContent,
-    sortMode,
     setSearchQuery,
     setDraftTitle,
     setDraftContent,
-    setSortMode,
     createNote,
     selectNote,
     deleteNote,
@@ -313,12 +366,10 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
           onStartDelete={startDeleteNote}
           onConfirmDelete={confirmDeleteNote}
           onCancelDelete={cancelDeleteNote}
-          sortMode={sortMode}
           onCreate={() => {
             if (activeDeleteNoteId !== null) cancelDeleteNote();
             return createNote();
           }}
-          onSortModeChange={setSortMode}
           readonly={readonly}
         />
 

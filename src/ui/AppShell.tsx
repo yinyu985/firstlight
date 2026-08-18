@@ -1,6 +1,6 @@
 import type { DynamicEffect } from "../shared/dynamicEffects";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { ChevronDown, ChevronRight, Notebook, Search, Settings, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
 import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
 import {
   type ColorParameterDefinition,
@@ -563,7 +563,7 @@ function trapTabKey(event: ReactKeyboardEvent<HTMLElement>): void {
   }
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) {
     event.preventDefault();
     last.focus();
   } else if (!event.shiftKey && document.activeElement === last) {
@@ -593,6 +593,7 @@ export function AppShell(props: Props) {
   const syncToastRef = useRef<HTMLDivElement>(null);
   const notesAppRef = useRef<NotesAppHandle>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const settingsDrawerRef = useRef<HTMLElement>(null);
   const [contentBounds, setContentBounds] = useState<{ left: number; width: number }>();
   const results = useMemo(() => searchBookmarks(state.bookmarks, query), [state.bookmarks, query]);
   const readonly = state.target === "online";
@@ -631,6 +632,12 @@ export function AppShell(props: Props) {
   useEffect(() => {
     if (props.openSetupOnLaunch) setSettingsOpen(true);
   }, [props.openSetupOnLaunch]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const frame = window.requestAnimationFrame(() => settingsDrawerRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!remoteOperationActive) {
@@ -875,8 +882,8 @@ export function AppShell(props: Props) {
       <button ref={settingsTriggerRef} className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings"><Settings size={20} strokeWidth={1.8} /></button>
 
       {settingsOpen && <><div className="drawer-backdrop" aria-hidden="true" onClick={closeSettings} />
-      <aside className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
-        <header className="drawer-header"><span id="settings-title" className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span><button type="button" autoFocus onClick={closeSettings} aria-label="Close settings"><X size={19} /></button></header>
+      <aside ref={settingsDrawerRef} className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
+        <header className="drawer-header"><span id="settings-title" className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span></header>
         <div className="drawer-content">
           <section className="settings-section">
             <div className="section-title"><span>BOOKMARKS</span>{!readonly && <button disabled={busy} onClick={props.onOpenBookmarkManager}>OPEN MANAGER ↗</button>}</div>
@@ -950,7 +957,7 @@ export function AppShell(props: Props) {
           </section>
 
           <section className="settings-section">
-            <div className="section-title"><span>SYNC</span><i className={`phase-${state.sync.phase}`}>{state.sync.gistId ? "ON" : "OFF"}</i></div>
+            <div className="section-title"><span>SYNC</span></div>
             <div className="token-row"><input type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token)}>{state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}</button></div>
             {!readonly && <div className="compact-actions sync-actions">
               <button disabled={busy || !state.tokenConfigured} onClick={props.onUpload}>UPLOAD</button>
