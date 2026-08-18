@@ -653,10 +653,35 @@ button { color: inherit; }
 .diff-header h2 { margin: 0; font-size: 13px; font-weight: 500; }
 .diff-header .icon-button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; color: #85a59d; background: transparent; cursor: pointer; }
 .diff-labels { height: 27px; padding: 0 14px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 18px; color: rgba(134,180,169,.5); background: #0d1519; font-size: 7px; letter-spacing: .08em; }
-.merge-host { flex: 1; min-height: 0; overflow: auto; color: #dce7e3; background: #080d10; color-scheme: dark; }
-.merge-host .cm-mergeView { height: 100%; background: #080d10; }
+.merge-frame { position: relative; flex: 1; min-height: 0; display: flex; }
+.merge-host { flex: 1; min-height: 0; overflow: hidden; color: #dce7e3; background: #080d10; color-scheme: dark; }
+.merge-host .cm-mergeView { height: 100%; scrollbar-width: none; background: #080d10; }
+.merge-host .cm-mergeView::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .merge-host .cm-editor { height: 100%; font-size: 11px; }
-.merge-host .cm-scroller { overflow: auto; font-family: "SFMono-Regular", Consolas, monospace; }
+.merge-host .cm-scroller { overflow: auto; scrollbar-width: none; font-family: "SFMono-Regular", Consolas, monospace; }
+.merge-host .cm-scroller::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+.diff-scrollbar {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  bottom: 2px;
+  z-index: 5;
+  width: 8px;
+  pointer-events: none;
+}
+
+.diff-scrollbar-thumb {
+  width: 3px;
+  margin-left: 3px;
+  background: color-mix(in srgb, #59d5b8 62%, transparent);
+  border-radius: 0;
+  cursor: ns-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.diff-scrollbar-thumb:hover { background: color-mix(in srgb, #59d5b8 72%, transparent); }
 .loading { padding: 25px; color: #688079; }
 .loading-dialog { padding: 13px 17px; color: #78cbb8; background: #0a1014; box-shadow: 0 0 0 1px rgba(97,198,174,.18); font-size: 9px; }
 .diff-actions { min-height: 50px; padding: 9px 14px; display: flex; justify-content: flex-end; align-items: center; gap: 6px; border-top: 1px solid rgba(97,198,174,.13); }

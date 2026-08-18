@@ -3,6 +3,7 @@ import { Check, Plus, Search, Trash2, X } from "lucide-react";
 import { formatNoteDate, useNotes } from "./useNotes";
 import type { SyncNote } from "../../shared/model";
 import { getNoteContentStats } from "./metrics";
+import { scrollbarMetrics, type ScrollbarMetrics } from "../scrollbar";
 
 interface NotesSidebarProps {
   notes: {
@@ -97,24 +98,6 @@ function NotesEmptyState() {
 const NOTES_SCROLLBAR_INSET = 2;
 const NOTES_SCROLLBAR_MAX_LENGTH = 20;
 
-interface NoteScrollbarState {
-  visible: boolean;
-  offset: number;
-  length: number;
-}
-
-function noteScrollbarState(element: HTMLTextAreaElement): NoteScrollbarState {
-  const scrollRange = element.scrollHeight - element.clientHeight;
-  const trackLength = Math.max(0, element.clientHeight - NOTES_SCROLLBAR_INSET * 2);
-  const length = Math.min(NOTES_SCROLLBAR_MAX_LENGTH, trackLength);
-  const travel = Math.max(0, trackLength - length);
-  return {
-    visible: scrollRange > 1 && length > 0,
-    offset: scrollRange > 0 ? (element.scrollTop / scrollRange) * travel : 0,
-    length
-  };
-}
-
 interface NotesEditorProps {
   selectedId: string | null;
   title: string;
@@ -139,7 +122,7 @@ function NotesEditor({
   const titleInputRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
-  const [scrollbar, setScrollbar] = useState<NoteScrollbarState>({ visible: false, offset: 0, length: NOTES_SCROLLBAR_MAX_LENGTH });
+  const [scrollbar, setScrollbar] = useState<ScrollbarMetrics>({ visible: false, offset: 0, length: NOTES_SCROLLBAR_MAX_LENGTH });
   const contentStats = useMemo(() => getNoteContentStats(content), [content]);
 
   useEffect(() => {
@@ -150,7 +133,7 @@ function NotesEditor({
   useLayoutEffect(() => {
     const area = contentRef.current;
     if (!area) return;
-    const update = () => setScrollbar(noteScrollbarState(area));
+    const update = () => setScrollbar(scrollbarMetrics(area, { inset: NOTES_SCROLLBAR_INSET, maxLength: NOTES_SCROLLBAR_MAX_LENGTH }));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(area);
@@ -189,7 +172,7 @@ function NotesEditor({
             value={content}
             placeholder="Start writing..."
             onChange={(event) => onContentChange(event.target.value)}
-            onScroll={(event) => setScrollbar(noteScrollbarState(event.currentTarget))}
+            onScroll={(event) => setScrollbar(scrollbarMetrics(event.currentTarget, { inset: NOTES_SCROLLBAR_INSET, maxLength: NOTES_SCROLLBAR_MAX_LENGTH }))}
             aria-label="Note content"
             readOnly={readonly}
           />
