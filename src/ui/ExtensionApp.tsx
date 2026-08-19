@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyncNote, SyncedSettings } from "../shared/model";
 import type { AppState, ExtensionRequest, ExtensionResponse } from "../shared/protocol";
+import { prepareBookmarkUrl } from "../shared/url";
 import { AppShell } from "./AppShell";
 
 async function request(message: ExtensionRequest): Promise<AppState> {
@@ -166,8 +167,10 @@ export function ExtensionApp() {
   if (!state) return <div className="boot-screen"><img src="./firstlight-mark.png" alt="Firstlight" />{error && <span>{error}</span>}</div>;
 
   const openBookmark = (url: string) => {
-    if (state.settings.openTarget === "current-tab") void chrome.tabs.update({ url });
-    else void chrome.tabs.create({ url });
+    const prepared = prepareBookmarkUrl(url);
+    if (state.settings.openTarget === "current-tab") void chrome.tabs.update({ url: prepared.url });
+    else void chrome.tabs.create({ url: prepared.url });
+    if (prepared.dispose) window.setTimeout(prepared.dispose, 60_000);
   };
 
   return <AppShell

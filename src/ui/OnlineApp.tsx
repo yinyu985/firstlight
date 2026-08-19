@@ -3,6 +3,7 @@ import { GistClient, normalizeGitHubToken } from "../shared/gist";
 import { DEFAULT_SETTINGS, canonicalSettings, snapshotFrom, type Snapshot, type SyncedSettings } from "../shared/model";
 import type { AppState } from "../shared/protocol";
 import { validateSnapshot } from "../shared/snapshot";
+import { prepareBookmarkUrl } from "../shared/url";
 import { AppShell } from "./AppShell";
 
 const TOKEN_KEY = "firstlight.online.token";
@@ -136,8 +137,10 @@ export function OnlineApp() {
   };
 
   const openBookmark = (url: string) => {
-    if (state.settings.openTarget === "current-tab") window.location.assign(url);
-    else window.open(url, "_blank", "noopener,noreferrer");
+    const prepared = prepareBookmarkUrl(url);
+    if (state.settings.openTarget === "current-tab") window.location.assign(prepared.url);
+    else window.open(prepared.url, "_blank", "noopener,noreferrer");
+    if (prepared.dispose) window.setTimeout(prepared.dispose, 60_000);
   };
 
   return <AppShell

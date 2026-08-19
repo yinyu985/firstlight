@@ -77,7 +77,7 @@ function NotesSidebar({
               </button>
             ))}
           </div>
-        )) : <div className="notes-list-empty">No notes</div>}
+        )) : <div className="notes-list-empty" aria-hidden="true" />}
       </div>
 
       {!readonly && <button type="button" className="notes-new-btn" onClick={onCreate} aria-label="Create new note">
@@ -90,7 +90,7 @@ function NotesSidebar({
 function NotesEmptyState() {
   return (
     <section className="notes-editor notes-editor-empty">
-      <div className="notes-editor-empty-inner">Create a new note</div>
+      <div className="notes-editor-empty-inner" aria-hidden="true"></div>
     </section>
   );
 }
