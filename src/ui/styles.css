@@ -849,12 +849,13 @@ button { color: inherit; }
 .settings-drawer .section-title::before {
   content: "";
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: 50%;
+  height: calc(100% + 8px);
   left: 0;
   width: 3px;
   background: var(--hover-color, #59d5b8);
   box-shadow: 0 0 9px color-mix(in srgb, var(--hover-color, #59d5b8) 48%, transparent);
+  transform: translateY(-50%);
 }
 .theme-light .settings-drawer .settings-section { border-bottom: 0; }
 
