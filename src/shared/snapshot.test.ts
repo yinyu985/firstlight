@@ -69,7 +69,7 @@ describe("canonical snapshot order", () => {
         bookmarkDetails: DEFAULT_SETTINGS.features.bookmarkDetails,
         clockSeconds: DEFAULT_SETTINGS.features.clockSeconds,
         hoverStyle: DEFAULT_SETTINGS.features.hoverStyle,
-        hoverColor: DEFAULT_SETTINGS.features.hoverColor,
+        themeColor: DEFAULT_SETTINGS.features.themeColor,
         themeMode: DEFAULT_SETTINGS.features.themeMode
       },
       clockPosition: DEFAULT_SETTINGS.clockPosition,
@@ -84,12 +84,12 @@ describe("canonical snapshot order", () => {
     };
     const snapshot = snapshotFrom([{ url: "https://example.com", title: "Example" }], scrambled);
 
-    expect(Object.keys(snapshot)).toEqual(["schemaVersion", "updatedAt", "config", "bookmarks", "notes"]);
+    expect(Object.keys(snapshot)).toEqual(["schemaVersion", "settingsVersion", "updatedAt", "config", "bookmarks", "notes"]);
     expect(Object.keys(snapshot.config)).toEqual(["openTarget", "background", "dynamicEffectProfiles", "foreground", "layout", "clockPosition", "features"]);
     expect(Object.keys(snapshot.config.background)).toEqual(["type", "from", "to", "angle"]);
     expect(Object.keys(snapshot.config.foreground)).toEqual(["color", "fontSize"]);
     expect(Object.keys(snapshot.config.layout)).toEqual(["rows", "columns", "bookmarkAlignment"]);
-    expect(Object.keys(snapshot.config.features)).toEqual(["searchPosition", "searchIcon", "searchText", "bookmarkDetails", "clockSeconds", "hoverStyle", "hoverColor", "themeMode"]);
+    expect(Object.keys(snapshot.config.features)).toEqual(["searchPosition", "searchIcon", "searchText", "bookmarkDetails", "clockSeconds", "hoverStyle", "themeColor", "themeMode"]);
     expect(Object.keys(snapshot.bookmarks[0])).toEqual(["title", "url"]);
 
     const remote = parseSnapshot(JSON.stringify(snapshot));
@@ -466,44 +466,70 @@ describe("parseSnapshot", () => {
     expect(parseSnapshot(JSON.stringify(legacy)).config.features.hoverStyle).toBe("underline");
   });
 
-  it("defaults hover color for snapshots saved before the setting existed", () => {
+  it("restores the default theme color when the field is missing", () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
     const legacy = JSON.parse(JSON.stringify(snapshot));
-    delete legacy.config.features.hoverColor;
-    expect(parseSnapshot(JSON.stringify(legacy)).config.features.hoverColor).toBe("#59d5b8");
+    delete legacy.config.features.themeColor;
+    expect(parseSnapshot(JSON.stringify(legacy)).config.features.themeColor).toBe(DEFAULT_SETTINGS.features.themeColor);
   });
 
-  it("accepts legacy boolean searchText values", () => {
+  it("drops unsupported feature fields instead of blocking the snapshot", () => {
+    const snapshot = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    snapshot.config.features.futureToggle = true;
+    expect(parseSnapshot(JSON.stringify(snapshot)).config.features).not.toHaveProperty("futureToggle");
+  });
+
+  it("replaces invalid searchText values instead of migrating old meanings", () => {
     const snapshot = parseSnapshot(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
     const hiddenLegacy = JSON.parse(JSON.stringify(snapshot));
     hiddenLegacy.config.features.searchText = false;
-    expect(parseSnapshot(JSON.stringify(hiddenLegacy)).config.features.searchText).toBe("hidden");
+    expect(parseSnapshot(JSON.stringify(hiddenLegacy)).config.features.searchText).toBe(DEFAULT_SETTINGS.features.searchText);
 
     const leftLegacy = JSON.parse(JSON.stringify(snapshot));
     leftLegacy.config.features.searchText = true;
     expect(parseSnapshot(JSON.stringify(leftLegacy)).config.features.searchText).toBe("left");
   });
 
-  it("rejects unknown hover styles", () => {
+  it("replaces unknown hover styles with the current default", () => {
     const snapshot = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
       features: { ...DEFAULT_SETTINGS.features, hoverStyle: "glow" as never }
     });
-    expect(() => parseSnapshot(JSON.stringify(snapshot))).toThrow("Feature settings are invalid");
+    expect(parseSnapshot(JSON.stringify(snapshot)).config.features.hoverStyle).toBe(DEFAULT_SETTINGS.features.hoverStyle);
   });
 
-  it("rejects the obsolete flat settings structure", () => {
+  it("rebuilds a missing config without touching snapshot content", () => {
     const current = snapshotFrom([], DEFAULT_SETTINGS);
     const { config, ...base } = current;
-    expect(() => parseSnapshot(JSON.stringify({ ...base, ...config }))).toThrow("Invalid snapshot config");
+    expect(parseSnapshot(JSON.stringify({ ...base, ...config })).config).toEqual({
+      ...DEFAULT_SETTINGS,
+      dynamicEffectProfiles: {}
+    });
   });
 
-  it("rejects text sizes below the current minimum", () => {
+  it("restores the default for text sizes below the current minimum", () => {
     const invalid = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
       foreground: { ...DEFAULT_SETTINGS.foreground, fontSize: 8 }
     });
-    expect(() => parseSnapshot(JSON.stringify(invalid))).toThrow("Invalid foreground settings");
+    expect(parseSnapshot(JSON.stringify(invalid)).config.foreground.fontSize).toBe(DEFAULT_SETTINGS.foreground.fontSize);
+  });
+
+  it("rejects settings produced by a newer client", () => {
+    const future = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    future.settingsVersion += 1;
+    expect(() => parseSnapshot(JSON.stringify(future))).toThrow("newer Firstlight version");
+  });
+
+  it("upgrades schema 1 snapshots into the current canonical shape", () => {
+    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    legacy.schemaVersion = 1;
+    delete legacy.settingsVersion;
+    legacy.config.features.unknownSetting = true;
+    const parsed = parseSnapshot(JSON.stringify(legacy));
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.settingsVersion).toBe(1);
+    expect(parsed.config.features).not.toHaveProperty("unknownSetting");
   });
 
   it("requires the East Eight timestamp offset", () => {
@@ -534,6 +560,18 @@ describe("parseSnapshot", () => {
     expect(() => validateSnapshot(invalid)).toThrow("Duplicate note id");
   });
 
+  it("rejects unsupported fields in otherwise valid notes", () => {
+    const note = {
+      id: "note-id",
+      name: "A",
+      content: "",
+      createtime: "2026-08-12T10:00:00.000+08:00",
+      updatetime: "2026-08-12T10:00:00.000+08:00",
+      futureField: true
+    };
+    expect(() => validateSnapshot({ ...snapshotFrom([], DEFAULT_SETTINGS), notes: [note] })).toThrow("unsupported fields");
+  });
+
   it("keeps missing notes as a legacy default but rejects a present malformed value", () => {
     const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
     delete legacy.notes;
@@ -544,7 +582,7 @@ describe("parseSnapshot", () => {
     }
   });
 
-  it("rejects non-finite background angles passed directly to the validator", () => {
+  it("normalizes non-finite background angles passed directly to the validator", () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
     const invalid = {
       ...snapshot,
@@ -553,7 +591,12 @@ describe("parseSnapshot", () => {
         background: { type: "gradient" as const, from: "#102030", to: "#304050", angle: Number.NaN }
       }
     };
-    expect(() => validateSnapshot(invalid)).toThrow("Invalid gradient settings");
+    expect(validateSnapshot(invalid).config.background).toEqual({
+      type: "gradient",
+      from: "#102030",
+      to: "#304050",
+      angle: DEFAULT_SETTINGS.background.type === "gradient" ? DEFAULT_SETTINGS.background.angle : 145
+    });
   });
 
   it("keeps an empty-string URL as a bookmark in the diff projection", async () => {
@@ -608,7 +651,14 @@ describe("dynamic effect range schema", () => {
       background: { type: "dynamic", effect: "flow", from: "#102030", to: "#304050", angle: 145, speed: 10 }
     })));
     invalid.config.background.effect = "constructor";
-    expect(() => parseSnapshot(JSON.stringify(invalid))).toThrow("Invalid dynamic background effect");
+    expect(parseSnapshot(JSON.stringify(invalid)).config.background).toMatchObject({
+      type: "dynamic",
+      effect: "flow",
+      from: "#102030",
+      to: "#304050",
+      angle: 145,
+      speed: 10
+    });
   });
 
   it("keeps numeric speed and parameter specs valid", () => {

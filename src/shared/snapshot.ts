@@ -1,8 +1,10 @@
 import {
   MAX_SNAPSHOT_BYTES,
+  SETTINGS_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
   type ClockPosition,
   canonicalSnapshot,
+  normalizeSettings,
   type SyncNote,
   type BookmarkItem,
   type DynamicEffectProfiles,
@@ -86,18 +88,68 @@ export class SnapshotValidationError extends Error {
   }
 }
 
+export function validateNotes(value: unknown): SyncNote[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new SnapshotValidationError("Invalid notes list");
+  const ids = new Set<string>();
+  const supportedKeys = new Set(["id", "name", "content", "createtime", "updatetime"]);
+  const isValidTimestamp = (raw: unknown): raw is string => (
+    typeof raw === "string" && raw.endsWith("+08:00") && !Number.isNaN(Date.parse(raw))
+  );
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new SnapshotValidationError(`Invalid note item at index ${index}`);
+    }
+    const note = item as Record<string, unknown>;
+    if (Object.keys(note).some((key) => !supportedKeys.has(key))) {
+      throw new SnapshotValidationError(`Note contains unsupported fields at index ${index}`);
+    }
+    if (typeof note.id !== "string" || note.id.length === 0) {
+      throw new SnapshotValidationError(`Note id is invalid at index ${index}`);
+    }
+    if (ids.has(note.id)) throw new SnapshotValidationError(`Duplicate note id at index ${index}`);
+    ids.add(note.id);
+    if (typeof note.name !== "string") {
+      throw new SnapshotValidationError(`Note name is invalid at index ${index}`);
+    }
+    if (typeof note.content !== "string") {
+      throw new SnapshotValidationError(`Note content is invalid at index ${index}`);
+    }
+    if (!isValidTimestamp(note.createtime)) {
+      throw new SnapshotValidationError(`Note createtime is invalid at index ${index}`);
+    }
+    if (!isValidTimestamp(note.updatetime)) {
+      throw new SnapshotValidationError(`Note updatetime is invalid at index ${index}`);
+    }
+    return {
+      id: note.id,
+      name: note.name,
+      content: note.content,
+      createtime: note.createtime,
+      updatetime: note.updatetime
+    };
+  });
+}
+
 export function validateSnapshot(input: unknown): Snapshot {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new SnapshotValidationError("The remote snapshot is not a JSON object");
   }
-  const value = input as Record<string, unknown>;
-  if (value.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
+  const rawValue = input as Record<string, unknown>;
+  if (rawValue.schemaVersion !== 1 && rawValue.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
     throw new SnapshotValidationError("Unsupported snapshot version");
   }
+  if (rawValue.settingsVersion !== undefined && (
+    typeof rawValue.settingsVersion !== "number" || !Number.isInteger(rawValue.settingsVersion) || rawValue.settingsVersion < 0
+  )) throw new SnapshotValidationError("Invalid settings version");
+  if (typeof rawValue.settingsVersion === "number" && rawValue.settingsVersion > SETTINGS_VERSION) {
+    throw new SnapshotValidationError("Settings were created by a newer Firstlight version");
+  }
+  const value: Record<string, unknown> = { ...rawValue, config: normalizeSettings(rawValue.config) };
   if (typeof value.updatedAt !== "string" || !value.updatedAt.endsWith("+08:00") || Number.isNaN(Date.parse(value.updatedAt))) {
     throw new SnapshotValidationError("Snapshot timestamp must use the +08:00 offset");
   }
-  const config = value.config as Record<string, unknown> | undefined;
+  const config = value.config as unknown as Record<string, unknown> | undefined;
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new SnapshotValidationError("Invalid snapshot config");
   }
@@ -191,6 +243,19 @@ export function validateSnapshot(input: unknown): Snapshot {
     throw new SnapshotValidationError("Clock position is invalid");
   }
   const features = config.features as Record<string, unknown> | undefined;
+  const supportedFeatureKeys = new Set([
+    "searchPosition",
+    "searchIcon",
+    "searchText",
+    "bookmarkDetails",
+    "clockSeconds",
+    "hoverStyle",
+    "themeColor",
+    "themeMode"
+  ]);
+  if (features && Object.keys(features).some((key) => !supportedFeatureKeys.has(key))) {
+    throw new SnapshotValidationError("Feature settings contain unsupported fields");
+  }
   const searchPosition = features?.searchPosition;
   const searchIcon = features?.searchIcon;
   const searchText = features?.searchText;
@@ -205,58 +270,20 @@ export function validateSnapshot(input: unknown): Snapshot {
   const bookmarkDetails = features?.bookmarkDetails;
   const clockSeconds = features?.clockSeconds;
   const hoverStyle = features?.hoverStyle === undefined ? "underline" : features.hoverStyle;
-  const hoverColor = features?.hoverColor === undefined ? "#59d5b8" : features.hoverColor;
+  const themeColor = features?.themeColor;
   const themeMode = features?.themeMode === undefined ? "dark" : features.themeMode;
+  if (typeof themeColor !== "string" || !HEX_COLOR.test(themeColor)) {
+    throw new SnapshotValidationError("Theme color is missing or invalid");
+  }
   if ((searchPosition !== "hidden" && searchPosition !== "left" && searchPosition !== "center" && searchPosition !== "right") ||
     typeof searchIcon !== "boolean" ||
     !isSearchTextPosition(normalizedSearchText) ||
     typeof bookmarkDetails !== "boolean" || typeof clockSeconds !== "boolean" ||
     (hoverStyle !== "underline" && hoverStyle !== "box" && hoverStyle !== "block") ||
-    typeof hoverColor !== "string" || !HEX_COLOR.test(hoverColor) ||
     (themeMode !== "dark" && themeMode !== "light")) {
     throw new SnapshotValidationError("Feature settings are invalid");
   }
   if (!Array.isArray(value.bookmarks)) throw new SnapshotValidationError("Invalid bookmark tree");
-
-  const isValidTimestamp = (raw: unknown): raw is string => {
-    return typeof raw === "string" && raw.endsWith("+08:00") && !Number.isNaN(Date.parse(raw));
-  };
-
-  const parseNotes = (value: unknown): SyncNote[] => {
-    if (value === undefined) return [];
-    if (!Array.isArray(value)) throw new SnapshotValidationError("Invalid notes list");
-    const ids = new Set<string>();
-    return value.map((item, index) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        throw new SnapshotValidationError(`Invalid note item at index ${index}`);
-      }
-      const note = item as Record<string, unknown>;
-      if (typeof note.id !== "string" || note.id.length === 0) {
-        throw new SnapshotValidationError(`Note id is invalid at index ${index}`);
-      }
-      if (ids.has(note.id)) throw new SnapshotValidationError(`Duplicate note id at index ${index}`);
-      ids.add(note.id);
-      if (typeof note.name !== "string") {
-        throw new SnapshotValidationError(`Note name is invalid at index ${index}`);
-      }
-      if (typeof note.content !== "string") {
-        throw new SnapshotValidationError(`Note content is invalid at index ${index}`);
-      }
-      if (!isValidTimestamp(note.createtime)) {
-        throw new SnapshotValidationError(`Note createtime is invalid at index ${index}`);
-      }
-      if (!isValidTimestamp(note.updatetime)) {
-        throw new SnapshotValidationError(`Note updatetime is invalid at index ${index}`);
-      }
-      return {
-        id: note.id,
-        name: note.name,
-        content: note.content,
-        createtime: note.createtime,
-        updatetime: note.updatetime
-      };
-    });
-  };
 
   let folders = 0;
   let bookmarks = 0;
@@ -287,6 +314,7 @@ export function validateSnapshot(input: unknown): Snapshot {
 
   const snapshot = {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    settingsVersion: SETTINGS_VERSION,
     updatedAt: value.updatedAt,
     config: {
       openTarget: config.openTarget,
@@ -320,12 +348,12 @@ export function validateSnapshot(input: unknown): Snapshot {
         bookmarkDetails,
         clockSeconds,
         hoverStyle,
-        hoverColor,
+        themeColor,
         themeMode
       }
     },
     bookmarks: validateNodes(value.bookmarks, 0),
-    notes: parseNotes(value.notes)
+    notes: validateNotes(value.notes)
   } satisfies Snapshot;
 
   if (snapshotBytes(snapshot) > MAX_SNAPSHOT_BYTES) {

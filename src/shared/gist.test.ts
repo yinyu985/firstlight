@@ -58,6 +58,40 @@ describe("normalizeGitHubToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retries an interrupted PATCH once", async () => {
+    const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })))
+      .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
+      .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })));
+
+    await expect(new GistClient("github_pat_test").update("gist-id", snapshot)).resolves.toMatchObject({ gistId: "gist-id" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.slice(1).every(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("reconciles an interrupted POST instead of creating a duplicate Gist", async () => {
+    const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
+      .mockResolvedValueOnce(jsonResponse([gistResponse({ snapshot })]))
+      .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })));
+
+    await expect(new GistClient("github_pat_test").create(snapshot)).resolves.toMatchObject({ gistId: "gist-id" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("does not blindly repeat an indeterminate POST", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
+      .mockResolvedValueOnce(jsonResponse([]));
+
+    await expect(new GistClient("github_pat_test").create(snapshotFrom([], DEFAULT_SETTINGS)))
+      .rejects.toThrow("not repeated to avoid creating a duplicate Gist");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("does not retry a definite 4xx response", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ message: "Not Found" }, 404));

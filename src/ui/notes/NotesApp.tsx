@@ -241,11 +241,14 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const frame = window.requestAnimationFrame(() => {
       if (windowRef.current && !windowRef.current.contains(document.activeElement)) windowRef.current.focus();
     });
     return () => {
       window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
   }, []);

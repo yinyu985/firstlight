@@ -290,16 +290,6 @@ export function resolveBalatroSettings(props: BalatroProps): BalatroSettings {
   };
 }
 
-function colorToHex(color: Color): string {
-  return `#${
-    Math.round(clamp(color[0], 0, 1) * 255).toString(16).padStart(2, "0")
-  }${
-    Math.round(clamp(color[1], 0, 1) * 255).toString(16).padStart(2, "0")
-  }${
-    Math.round(clamp(color[2], 0, 1) * 255).toString(16).padStart(2, "0")
-  }`;
-}
-
 export function Balatro({
   className = "dynamic-background",
   ...rest

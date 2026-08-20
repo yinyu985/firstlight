@@ -1,30 +1,29 @@
 import { GistClient, GitHubError, normalizeGitHubToken, type RemoteSnapshot } from "../shared/gist";
 import {
   DEFAULT_SETTINGS,
-  SNAPSHOT_SCHEMA_VERSION,
+  SETTINGS_VERSION,
   type BookmarkItem,
   type DiffPayload,
-  type SyncNote,
   type RecoveryPoint,
   type RecoveryReason,
   type Snapshot,
   type SyncStatus,
   type SyncedSettings,
   createDiffId,
+  normalizeSettings,
   snapshotFrom,
   eastEightTimestamp,
   settingsFromSnapshot
 } from "../shared/model";
-import {
-  normalizeDynamicEffect,
-  normalizeDynamicParameters,
-  normalizeDynamicSpeed
-} from "../shared/dynamicEffects";
 import type { AppState, ExtensionRequest, ExtensionResponse, StoredState } from "../shared/protocol";
-import { SnapshotValidationError, snapshotHash, validateSnapshot } from "../shared/snapshot";
+import { parseExtensionRequest } from "../shared/requestValidation";
+import { snapshotHash, stableStringify, validateNotes, validateSnapshot } from "../shared/snapshot";
 import { canAutoUpload, decideSyncWithRevision } from "../shared/sync-decision";
 
 const STORAGE_KEY = "firstlight";
+const UPLOAD_ALARM = "firstlight-pending-upload";
+const UPLOAD_DEBOUNCE_MS = 10_000;
+const UPLOAD_RETRY_MAX_MS = 5 * 60_000;
 let memory: StoredState = {};
 let bookmarks: BookmarkItem[] = [];
 let initialized = false;
@@ -35,6 +34,7 @@ let operation = Promise.resolve();
 let startupRemoteCheckPending = false;
 let startupRemoteCheckRequested = false;
 let openSetupOnLaunch = false;
+let pendingUploadRunning = false;
 
 class HandledOperationError extends Error {
   constructor(message: string) {
@@ -49,10 +49,13 @@ function queue<T>(task: () => Promise<T>): Promise<T> {
   return next;
 }
 
-function cancelScheduledUpload(): void {
-  if (!uploadTimer) return;
-  clearTimeout(uploadTimer);
-  uploadTimer = undefined;
+function cancelScheduledUpload(clearPending = false): void {
+  if (uploadTimer) {
+    clearTimeout(uploadTimer);
+    uploadTimer = undefined;
+  }
+  void chrome.alarms.clear(UPLOAD_ALARM).catch(() => undefined);
+  if (clearPending) memory.pendingUpload = undefined;
 }
 
 function remoteDiff(
@@ -71,11 +74,6 @@ function remoteDiff(
     left,
     right: remote.snapshot
   };
-}
-
-async function createRemoteDiff(left: Snapshot, remote: RemoteSnapshot): Promise<DiffPayload> {
-  const [leftHash, rightHash] = await Promise.all([snapshotHash(left), snapshotHash(remote.snapshot)]);
-  return remoteDiff(left, remote, leftHash, rightHash);
 }
 
 function requirePendingDiff(diffId: string): DiffPayload {
@@ -173,29 +171,6 @@ async function refreshPendingDiffLeft(local = currentSnapshot()): Promise<void> 
   };
 }
 
-function normalizeNotes(raw: unknown): SyncNote[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item): SyncNote | undefined => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
-      const note = item as Record<string, unknown>;
-      if (typeof note.id !== "string" || typeof note.name !== "string" || typeof note.content !== "string" || typeof note.createtime !== "string" || typeof note.updatetime !== "string") {
-        return undefined;
-      }
-      if (!note.createtime.endsWith("+08:00") || !note.updatetime.endsWith("+08:00") || Number.isNaN(Date.parse(note.createtime)) || Number.isNaN(Date.parse(note.updatetime))) {
-        return undefined;
-      }
-      return {
-        id: note.id,
-        name: note.name,
-        content: note.content,
-        createtime: note.createtime,
-        updatetime: note.updatetime
-      };
-    })
-    .filter((note): note is SyncNote => note !== undefined);
-}
-
 function appState(): AppState {
   return {
     target: "extension",
@@ -242,18 +217,6 @@ async function publishToast(message: string): Promise<void> {
   broadcast();
 }
 
-async function saveRecovery(snapshot: Snapshot, reason: RecoveryReason): Promise<RecoveryPoint> {
-  const point: RecoveryPoint = {
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    reason,
-    snapshot
-  };
-  memory.recoveryPoints = [point, ...(memory.recoveryPoints ?? [])].slice(0, 3);
-  await saveMemory();
-  return point;
-}
-
 async function establishBaseline(snapshot: Snapshot, remote: RemoteSnapshot): Promise<void> {
   const [localHash, remoteHash] = await Promise.all([snapshotHash(snapshot), snapshotHash(remote.snapshot)]);
   if (localHash !== remoteHash) {
@@ -264,6 +227,7 @@ async function establishBaseline(snapshot: Snapshot, remote: RemoteSnapshot): Pr
   memory.gistId = remote.gistId;
   memory.gistUrl = remote.htmlUrl;
   memory.pendingDiff = undefined;
+  cancelScheduledUpload(true);
   memory.sync = {
     phase: "synced",
     message: "Synced",
@@ -274,27 +238,50 @@ async function establishBaseline(snapshot: Snapshot, remote: RemoteSnapshot): Pr
   broadcast();
 }
 
+async function overwriteAndVerifySnapshot(target: Snapshot): Promise<void> {
+  await overwriteBookmarks(target.bookmarks);
+  memory.settings = settingsFromSnapshot(target);
+  memory.notes = target.notes;
+  bookmarks = await readBookmarks();
+  const verified = snapshotFrom(bookmarks, memory.settings, memory.notes, target.updatedAt);
+  if (await snapshotHash(verified) !== await snapshotHash(target)) {
+    throw new Error("Restored bookmarks failed verification");
+  }
+  memory.localUpdatedAt = target.updatedAt;
+}
+
+async function prepareRestore(before: Snapshot, target: Snapshot, reason: RecoveryReason): Promise<void> {
+  const point: RecoveryPoint = {
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    reason,
+    snapshot: before
+  };
+  memory.recoveryPoints = [point, ...(memory.recoveryPoints ?? [])].slice(0, 3);
+  memory.restoreJournal = {
+    recoveryPointId: point.id,
+    targetHash: await snapshotHash(target),
+    startedAt: point.createdAt
+  };
+  cancelScheduledUpload(true);
+  memory.sync = { phase: "restoring", message: "Restoring bookmarks…", gistId: memory.gistId };
+  await saveMemory();
+  broadcast();
+}
+
 async function restoreSnapshot(target: Snapshot, reason: RecoveryReason): Promise<void> {
   validateSnapshot(target);
-  cancelScheduledUpload();
+  cancelScheduledUpload(true);
   restoring = true;
   let before: Snapshot | undefined;
   let mutationStarted = false;
   try {
     bookmarks = await readBookmarks();
     before = currentSnapshot();
-    await saveRecovery(before, reason);
-    await setStatus({ phase: "restoring", message: "Restoring bookmarks…", gistId: memory.gistId });
+    await prepareRestore(before, target, reason);
     mutationStarted = true;
-    await overwriteBookmarks(target.bookmarks);
-    memory.settings = settingsFromSnapshot(target);
-    bookmarks = await readBookmarks();
-    memory.notes = target.notes ?? [];
-    const verified = snapshotFrom(bookmarks, memory.settings, memory.notes);
-    if (await snapshotHash(verified) !== await snapshotHash(target)) {
-      throw new Error("Restored bookmarks failed verification");
-    }
-    memory.localUpdatedAt = target.updatedAt;
+    await overwriteAndVerifySnapshot(target);
+    memory.restoreJournal = undefined;
     await saveMemory();
   } catch (error) {
     const restoreError = errorMessage(error);
@@ -306,22 +293,18 @@ async function restoreSnapshot(target: Snapshot, reason: RecoveryReason): Promis
 
     let rollbackError: unknown;
     try {
-      await overwriteBookmarks(before.bookmarks);
-      memory.settings = settingsFromSnapshot(before);
-      memory.notes = before.notes;
-      bookmarks = await readBookmarks();
-      const rollback = snapshotFrom(bookmarks, memory.settings, memory.notes, before.updatedAt);
-      if (await snapshotHash(rollback) !== await snapshotHash(before)) throw new Error("Rollback verification failed");
-      memory.localUpdatedAt = before.updatedAt;
+      await overwriteAndVerifySnapshot(before);
+      memory.restoreJournal = undefined;
       await saveMemory();
     } catch (errorDuringRollback) {
       rollbackError = errorDuringRollback;
     }
 
     if (rollbackError !== undefined) {
-      cancelScheduledUpload();
+      cancelScheduledUpload(true);
       memory.syncEnabled = false;
       memory.baseline = undefined;
+      memory.pendingDiff = undefined;
       const message = `Restore failed: ${restoreError}. Rollback also failed: ${errorMessage(rollbackError)}`;
       await setStatusBestEffort({ phase: "error", message, gistId: memory.gistId });
       throw new HandledOperationError(message);
@@ -346,7 +329,7 @@ function isBadCredentials(error: unknown): boolean {
 }
 
 async function deactivateRemoteSync(message = "Remote auth failed. Check your GitHub token"): Promise<void> {
-  cancelScheduledUpload();
+  cancelScheduledUpload(true);
   memory.syncEnabled = false;
   memory.gistId = undefined;
   memory.gistUrl = undefined;
@@ -355,6 +338,12 @@ async function deactivateRemoteSync(message = "Remote auth failed. Check your Gi
   memory.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 };
   await saveMemory();
   broadcast();
+}
+
+function assertRestoreComplete(): void {
+  if (memory.restoreJournal) {
+    throw new HandledOperationError("An interrupted restore must be rolled back before remote sync can continue.");
+  }
 }
 
 async function connectedClient(): Promise<GistClient> {
@@ -387,6 +376,7 @@ async function resolveGist(client: GistClient, create: boolean, beforeCreate?: (
 }
 
 async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
+  if (memory.restoreJournal) return;
   if (!memory.token) return;
   await setStatus({ phase: "discovering", message: "Checking remote…", gistId: memory.gistId });
   try {
@@ -401,15 +391,7 @@ async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
     const local = validateSnapshot(currentSnapshot());
     const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
     if (localHash !== remoteHash) {
-      if (memory.baseline && remoteHash === memory.baseline.remoteHash) {
-        memory.pendingDiff = undefined;
-        const uploaded = await client.update(remote.gistId, local);
-        if (await snapshotHash(uploaded.snapshot) !== localHash) throw new Error("Remote verification failed after upload");
-        await establishBaseline(local, uploaded);
-        memory.sync = { ...memory.sync!, message: "Uploaded to remote" };
-        await publishToast("Uploaded to remote");
-        return;
-      }
+      cancelScheduledUpload(true);
       memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
       memory.gistUrl = remote.htmlUrl;
       await setStatus({ phase: "conflict", message: "Local and remote differ. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
@@ -426,7 +408,7 @@ async function checkRemoteOnStartup(createIfMissing = false): Promise<void> {
 }
 
 function scheduleStartupRemoteCheck(): void {
-  if (startupRemoteCheckRequested || startupRemoteCheckPending || !memory.syncEnabled) return;
+  if (startupRemoteCheckRequested || startupRemoteCheckPending || memory.pendingUpload || !memory.syncEnabled) return;
   startupRemoteCheckRequested = true;
   startupRemoteCheckPending = true;
   void queue(() => checkRemoteOnStartup())
@@ -441,6 +423,7 @@ function scheduleStartupRemoteCheck(): void {
 }
 
 async function upload(force = false): Promise<void> {
+  assertRestoreComplete();
   bookmarks = await readBookmarks();
   const local = validateSnapshot(currentSnapshot());
   try {
@@ -460,6 +443,7 @@ async function upload(force = false): Promise<void> {
         remote.updatedAt
       );
       if (decision === "conflict" || decision === "restore") {
+        cancelScheduledUpload(true);
         memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
         memory.gistUrl = remote.htmlUrl;
         await setStatus({ phase: "conflict", message: "Remote changed. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
@@ -472,6 +456,7 @@ async function upload(force = false): Promise<void> {
     } else if (!memory.baseline && memory.gistId && !force) {
       const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
       if (localHash !== remoteHash) {
+        cancelScheduledUpload(true);
         memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
         memory.gistUrl = remote.htmlUrl;
         await setStatus({ phase: "conflict", message: "Choose the local or remote snapshot", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
@@ -491,16 +476,6 @@ async function upload(force = false): Promise<void> {
       await deactivateRemoteSync("Invalid GitHub token");
       return;
     }
-    if (force && error instanceof SnapshotValidationError && memory.gistId) {
-      const client = await connectedClient();
-      const remote = await client.update(memory.gistId, local);
-      const [remoteHash, localHash] = await Promise.all([snapshotHash(remote.snapshot), snapshotHash(local)]);
-      if (remoteHash !== localHash) throw new Error("Remote verification failed after replacing the invalid snapshot");
-      await establishBaseline(local, remote);
-      memory.sync = { ...memory.sync!, message: "Uploaded current snapshot" };
-      await publishToast("Uploaded current snapshot");
-      return;
-    }
     throw error;
   }
 }
@@ -509,34 +484,75 @@ async function importFromChrome(): Promise<void> {
   bookmarks = await readBookmarks();
   memory.localUpdatedAt = touchLocalUpdatedAt();
   await refreshPendingDiffLeft();
-  await saveMemory();
   scheduleUpload();
+  await saveMemory();
+  armPendingUpload();
   await publishToast("Chrome bookmarks imported");
 }
 
 function scheduleUpload(): void {
   if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) {
-    cancelScheduledUpload();
+    cancelScheduledUpload(true);
     return;
   }
   cancelScheduledUpload();
-  uploadTimer = setTimeout(() => {
+  memory.pendingUpload = { dueAt: Date.now() + UPLOAD_DEBOUNCE_MS, attempts: 0 };
+}
+
+function armPendingUpload(): void {
+  if (uploadTimer) {
+    clearTimeout(uploadTimer);
     uploadTimer = undefined;
-    queue(async () => {
-      if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) return;
+  }
+  const pending = memory.pendingUpload;
+  if (!pending || !canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) {
+    void chrome.alarms.clear(UPLOAD_ALARM).catch(() => undefined);
+    return;
+  }
+  const delay = Math.max(0, pending.dueAt - Date.now());
+  uploadTimer = setTimeout(triggerPendingUpload, delay);
+  void chrome.alarms.create(UPLOAD_ALARM, { when: Math.max(pending.dueAt, Date.now() + 1) }).catch(() => undefined);
+}
+
+function triggerPendingUpload(): void {
+  if (pendingUploadRunning || !memory.pendingUpload) return;
+  if (memory.pendingUpload.dueAt > Date.now()) {
+    armPendingUpload();
+    return;
+  }
+  pendingUploadRunning = true;
+  cancelScheduledUpload();
+  void queue(async () => {
+    if (!memory.pendingUpload) return;
+    if (memory.pendingUpload.dueAt > Date.now()) return;
+    if (!canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) {
+      cancelScheduledUpload(true);
+      await saveMemory();
+      return;
+    }
+    try {
       await upload(false);
-    }).catch(async (error) => {
-      try {
-        if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
-        else await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
-      } catch {
-        // The in-memory status has already been updated as far as possible.
+      startupRemoteCheckRequested = true;
+    } catch (error) {
+      if (isBadCredentials(error)) {
+        await deactivateRemoteSync("Invalid GitHub token");
+        return;
       }
-    });
-  }, 10_000);
+      const attempts = memory.pendingUpload.attempts + 1;
+      const retryDelay = Math.min(UPLOAD_RETRY_MAX_MS, UPLOAD_DEBOUNCE_MS * 2 ** Math.min(attempts, 5));
+      memory.pendingUpload = { dueAt: Date.now() + retryDelay, attempts };
+      await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+    }
+  }).catch(async (error) => {
+    await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+  }).finally(() => {
+    pendingUploadRunning = false;
+    if (memory.pendingUpload) armPendingUpload();
+  });
 }
 
 async function compareRemote(): Promise<void> {
+  assertRestoreComplete();
   try {
     const client = await connectedClient();
     const remote = await resolveGist(client, false);
@@ -551,6 +567,7 @@ async function compareRemote(): Promise<void> {
       return;
     }
     memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
+    cancelScheduledUpload(true);
     memory.gistUrl = remote.htmlUrl;
     await setStatus({ phase: "conflict", message: "Local and remote differ. Choose a snapshot.", gistId: remote.gistId, remoteUpdatedAt: remote.updatedAt });
   } catch (error) {
@@ -620,57 +637,58 @@ async function clearDiff(diffId: string): Promise<void> {
   broadcast();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function validRestoreJournal(): { point: RecoveryPoint } | undefined {
+  const journal = memory.restoreJournal;
+  if (!journal ||
+    typeof journal.recoveryPointId !== "string" || !journal.recoveryPointId ||
+    typeof journal.targetHash !== "string" || !/^[0-9a-f]{64}$/u.test(journal.targetHash) ||
+    typeof journal.startedAt !== "string" || Number.isNaN(Date.parse(journal.startedAt))) {
+    return undefined;
+  }
+  const point = memory.recoveryPoints?.find((candidate) => candidate.id === journal.recoveryPointId);
+  return point ? { point } : undefined;
 }
 
-function defaultSettings(): SyncedSettings {
-  return settingsFromSnapshot(snapshotFrom([], DEFAULT_SETTINGS, []));
-}
-
-function normalizeStoredSettings(raw: unknown): { settings: SyncedSettings; changed: boolean; recovered: boolean } {
-  const fallback = defaultSettings();
-  if (raw === undefined) return { settings: fallback, changed: true, recovered: false };
-  if (!isRecord(raw)) return { settings: fallback, changed: true, recovered: true };
-
-  const hasRequiredObjects = isRecord(raw.background) && isRecord(raw.foreground) && isRecord(raw.layout) && isRecord(raw.features);
-  const background: Record<string, unknown> = isRecord(raw.background)
-    ? { ...DEFAULT_SETTINGS.background, ...raw.background }
-    : { ...DEFAULT_SETTINGS.background };
-  if (background.type === "dynamic") {
-    const effect = normalizeDynamicEffect(background.effect);
-    background.effect = effect;
-    background.angle = typeof background.angle === "number" && Number.isFinite(background.angle) ? background.angle : 145;
-    background.speed = normalizeDynamicSpeed(effect, typeof background.speed === "number" ? background.speed : undefined);
-    background.parameters = normalizeDynamicParameters(effect, background.parameters);
+async function recoverInterruptedRestore(): Promise<void> {
+  if (!memory.restoreJournal) return;
+  const recovery = validRestoreJournal();
+  cancelScheduledUpload(true);
+  if (!recovery) {
+    memory.restoreJournal = undefined;
+    memory.syncEnabled = false;
+    memory.baseline = undefined;
+    memory.pendingDiff = undefined;
+    memory.sync = { phase: "error", message: "Interrupted restore journal is invalid. Automatic sync was disabled.", gistId: memory.gistId };
+    return;
   }
 
-  const candidate = {
-    ...DEFAULT_SETTINGS,
-    ...raw,
-    background,
-    foreground: isRecord(raw.foreground) ? { ...DEFAULT_SETTINGS.foreground, ...raw.foreground } : { ...DEFAULT_SETTINGS.foreground },
-    layout: isRecord(raw.layout) ? { ...DEFAULT_SETTINGS.layout, ...raw.layout } : { ...DEFAULT_SETTINGS.layout },
-    features: isRecord(raw.features) ? { ...DEFAULT_SETTINGS.features, ...raw.features } : { ...DEFAULT_SETTINGS.features }
-  };
-
+  restoring = true;
   try {
-    const validated = validateSnapshot({
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      updatedAt: eastEightTimestamp(),
-      config: candidate,
-      bookmarks: [],
-      notes: []
-    });
-    const settings = settingsFromSnapshot(validated);
-    return {
-      settings,
-      changed: JSON.stringify(raw) !== JSON.stringify(settings),
-      recovered: !hasRequiredObjects
+    await overwriteAndVerifySnapshot(recovery.point.snapshot);
+    memory.restoreJournal = undefined;
+    memory.sync = { phase: "error", message: "An interrupted restore was rolled back to the previous local snapshot.", gistId: memory.gistId };
+  } catch (error) {
+    memory.syncEnabled = false;
+    memory.baseline = undefined;
+    memory.pendingDiff = undefined;
+    memory.sync = {
+      phase: "error",
+      message: `Interrupted restore rollback failed: ${errorMessage(error)}. Automatic sync was disabled.`,
+      gistId: memory.gistId
     };
-  } catch {
-    return { settings: fallback, changed: true, recovered: true };
+  } finally {
+    restoring = false;
   }
+}
+
+type SettingsRepair = "none" | "fields" | "reset";
+
+function normalizeStoredSettings(raw: unknown): { settings: SyncedSettings; changed: boolean; repair: SettingsRepair } {
+  const settings = normalizeSettings(raw);
+  if (raw === undefined) return { settings, changed: true, repair: "none" };
+  const reset = !raw || typeof raw !== "object" || Array.isArray(raw);
+  const changed = stableStringify(raw) !== stableStringify(settings);
+  return { settings, changed, repair: changed ? (reset ? "reset" : "fields") : "none" };
 }
 
 async function initialize(): Promise<void> {
@@ -681,14 +699,20 @@ async function initialize(): Promise<void> {
   const normalizedSettings = normalizeStoredSettings(memory.settings);
   memory.settings = normalizedSettings.settings;
   memoryChanged ||= normalizedSettings.changed;
+  if (memory.settingsVersion !== SETTINGS_VERSION) {
+    memory.settingsVersion = SETTINGS_VERSION;
+    memoryChanged = true;
+  }
   openSetupOnLaunch = !memory.setupSeen;
   if (!memory.localUpdatedAt) {
     memory.localUpdatedAt = eastEightTimestamp();
     memoryChanged = true;
   }
-  const normalizedNotes = normalizeNotes(memory.notes);
-  if (JSON.stringify(normalizedNotes) !== JSON.stringify(memory.notes ?? [])) memoryChanged = true;
-  memory.notes = normalizedNotes;
+  try {
+    memory.notes = validateNotes(memory.notes);
+  } catch (error) {
+    throw new Error(`Stored Notes are invalid and were left unchanged: ${errorMessage(error)}`, { cause: error });
+  }
   if (memory.toast && (!Number.isFinite(memory.toast.expiresAt) || memory.toast.expiresAt <= Date.now())) {
     memory.toast = undefined;
     memoryChanged = true;
@@ -699,6 +723,14 @@ async function initialize(): Promise<void> {
   });
   if (recoveryPoints.length !== (memory.recoveryPoints ?? []).length) memoryChanged = true;
   memory.recoveryPoints = recoveryPoints;
+  if (memory.pendingUpload && (
+    typeof memory.pendingUpload.dueAt !== "number" || !Number.isFinite(memory.pendingUpload.dueAt) ||
+    typeof memory.pendingUpload.attempts !== "number" || !Number.isInteger(memory.pendingUpload.attempts) ||
+    memory.pendingUpload.attempts < 0
+  )) {
+    memory.pendingUpload = undefined;
+    memoryChanged = true;
+  }
   if (memory.baseline && (
     typeof memory.baseline.localHash !== "string" ||
     typeof memory.baseline.remoteHash !== "string" ||
@@ -727,8 +759,10 @@ async function initialize(): Promise<void> {
     }
   }
 
-  if (normalizedSettings.recovered) {
-    const message = "Stored settings were invalid and were reset to safe defaults";
+  if (normalizedSettings.repair !== "none") {
+    const message = normalizedSettings.repair === "reset"
+      ? "Stored settings were invalid and were reset to safe defaults"
+      : "Some stored settings were invalid and were repaired";
     memory.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 };
     memory.baseline = undefined;
     memory.localUpdatedAt = eastEightTimestamp();
@@ -742,13 +776,22 @@ async function initialize(): Promise<void> {
     memory.sync = { phase: "local-only", message: "Remote not configured" };
     memoryChanged = true;
   }
-  if (memory.token && memory.gistId && memory.sync && (
+  if (!memory.restoreJournal && memory.token && memory.gistId && memory.sync && (
     memory.sync.phase === "uploading" || memory.sync.phase === "restoring" || memory.sync.phase === "discovering"
   )) {
     memory.sync = { phase: "discovering", message: "Checking remote…", gistId: memory.gistId };
     memoryChanged = true;
   }
   bookmarks = await readBookmarks();
+  if (memory.restoreJournal) {
+    await recoverInterruptedRestore();
+    bookmarks = await readBookmarks();
+    memoryChanged = true;
+  }
+  if (memory.pendingUpload && !canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)) {
+    memory.pendingUpload = undefined;
+    memoryChanged = true;
+  }
   if (memory.pendingDiff) {
     const local = currentSnapshot();
     const leftHash = await snapshotHash(local);
@@ -770,6 +813,7 @@ async function initialize(): Promise<void> {
   if (memoryChanged) await saveMemory();
   initialized = true;
   broadcast();
+  armPendingUpload();
 }
 
 function ensureInitialized(): Promise<void> {
@@ -786,27 +830,29 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
   switch (request.type) {
     case "GET_STATE": break;
     case "SAVE_SETTINGS":
-      memory.settings = request.settings;
+      memory.settings = settingsFromSnapshot(validateSnapshot(snapshotFrom([], request.settings, [])));
       memory.localUpdatedAt = touchLocalUpdatedAt();
       await refreshPendingDiffLeft();
+      scheduleUpload();
       await saveMemory();
       broadcast();
-      scheduleUpload();
+      armPendingUpload();
       break;
     case "SAVE_NOTES":
-      memory.notes = request.notes.map((note) => ({
+      memory.notes = validateSnapshot(snapshotFrom([], currentSettings(), request.notes)).notes.map((note) => ({
         ...note,
         createtime: note.createtime,
         updatetime: note.updatetime
       }));
       memory.localUpdatedAt = touchLocalUpdatedAt();
       await refreshPendingDiffLeft();
+      scheduleUpload();
       await saveMemory();
       broadcast();
-      scheduleUpload();
+      armPendingUpload();
       break;
     case "SAVE_TOKEN":
-      cancelScheduledUpload();
+      cancelScheduledUpload(true);
       memory.token = normalizeGitHubToken(request.token) || undefined;
       memory.gistId = undefined;
       memory.gistUrl = undefined;
@@ -817,18 +863,26 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
       if (memory.token) await checkRemoteOnStartup(true);
       else await setStatus({ phase: "local-only", message: "Local only" });
       break;
-    case "UPLOAD_NOW": await upload(false); break;
+    case "UPLOAD_NOW": await upload(true); break;
     case "IMPORT_BOOKMARKS": await importFromChrome(); break;
     case "COMPARE_REMOTE": await compareRemote(); break;
     case "USE_LOCAL": await useLocal(request.diffId); break;
     case "USE_REMOTE": await useRemote(request.diffId); break;
     case "CLEAR_DIFF": await clearDiff(request.diffId); break;
     case "OPEN_BOOKMARK_MANAGER": await chrome.tabs.create({ url: "chrome://bookmarks/" }); break;
+    default: throw new Error("Unsupported extension request");
   }
   return appState();
 }
 
-chrome.runtime.onMessage.addListener((request: ExtensionRequest, _sender, sendResponse: (response: ExtensionResponse) => void) => {
+chrome.runtime.onMessage.addListener((rawRequest: unknown, _sender, sendResponse: (response: ExtensionResponse) => void) => {
+  let request: ExtensionRequest;
+  try {
+    request = parseExtensionRequest(rawRequest);
+  } catch (error) {
+    sendResponse({ ok: false, state: appState(), error: errorMessage(error) });
+    return false;
+  }
   if (request.type === "GET_STATE") {
     void ensureInitialized()
       .then(async () => {
@@ -867,16 +921,19 @@ chrome.runtime.onMessage.addListener((request: ExtensionRequest, _sender, sendRe
   return true;
 });
 
-const onBookmarksChanged = () => {
+let bookmarkChangeTimer: ReturnType<typeof setTimeout> | undefined;
+
+const persistBookmarkChanges = () => {
   if (restoring) return;
   queue(async () => {
     await ensureInitialized();
     bookmarks = await readBookmarks();
     memory.localUpdatedAt = touchLocalUpdatedAt();
     await refreshPendingDiffLeft();
+    scheduleUpload();
     await saveMemory();
     broadcast();
-    scheduleUpload();
+    armPendingUpload();
   }).catch(async (error) => {
     try {
       if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
@@ -887,11 +944,25 @@ const onBookmarksChanged = () => {
   });
 };
 
+const onBookmarksChanged = () => {
+  if (restoring) return;
+  if (bookmarkChangeTimer) clearTimeout(bookmarkChangeTimer);
+  bookmarkChangeTimer = setTimeout(() => {
+    bookmarkChangeTimer = undefined;
+    persistBookmarkChanges();
+  }, 100);
+};
+
 chrome.bookmarks.onCreated.addListener(onBookmarksChanged);
 chrome.bookmarks.onRemoved.addListener(onBookmarksChanged);
 chrome.bookmarks.onChanged.addListener(onBookmarksChanged);
 chrome.bookmarks.onMoved.addListener(onBookmarksChanged);
 chrome.bookmarks.onChildrenReordered.addListener(onBookmarksChanged);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === UPLOAD_ALARM) {
+    void ensureInitialized().then(triggerPendingUpload).catch(() => undefined);
+  }
+});
 chrome.runtime.onInstalled.addListener(() => { void ensureInitialized(); });
 chrome.runtime.onStartup.addListener(() => {
   void ensureInitialized().then(scheduleStartupRemoteCheck);
@@ -899,4 +970,4 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({});
 });
-void ensureInitialized();
+void ensureInitialized().catch(() => undefined);

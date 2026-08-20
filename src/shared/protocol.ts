@@ -2,7 +2,9 @@ import type {
   BookmarkItem,
   SyncNote,
   DiffPayload,
+  PendingUpload,
   RecoveryPoint,
+  RestoreJournal,
   Snapshot,
   SyncedSettings,
   SyncStatus,
@@ -43,6 +45,7 @@ export interface ExtensionResponse {
 }
 
 export interface StoredState {
+  settingsVersion?: number;
   syncEnabled?: boolean;
   token?: string;
   gistId?: string;
@@ -51,6 +54,8 @@ export interface StoredState {
   settings?: SyncedSettings;
   baseline?: import("./model").SyncBaseline;
   recoveryPoints?: RecoveryPoint[];
+  restoreJournal?: RestoreJournal;
+  pendingUpload?: PendingUpload;
   sync?: SyncStatus;
   toast?: ToastNotice;
   notes?: SyncNote[];

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; frame-src data:; object-src 'none'; base-uri 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Firstlight Data Bookmark</title>
+  </head>
+  <body>
+    <p id="data-bookmark-status">Loading data bookmark...</p>
+    <iframe id="data-bookmark-frame" title="Data bookmark launcher" sandbox="allow-scripts allow-top-navigation" hidden></iframe>
+    <script type="module" src="/src/data-viewer.ts"></script>
+  </body>
+</html>

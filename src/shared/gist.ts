@@ -28,8 +28,10 @@ export interface RemoteSnapshot {
   snapshot: Snapshot;
 }
 
+type GitHubFailureKind = "timeout" | "interrupted" | "network";
+
 export class GitHubError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(message: string, readonly status?: number, readonly kind?: GitHubFailureKind) {
     super(message);
     this.name = "GitHubError";
   }
@@ -56,7 +58,8 @@ export class GistClient {
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
     const method = init?.method?.toUpperCase() ?? "GET";
-    const attempts = method === "GET" ? 2 : 1;
+    const retryableMethod = method === "GET" || method === "PATCH";
+    const attempts = retryableMethod ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       let response: Response;
       try {
@@ -76,10 +79,10 @@ export class GistClient {
         const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
         const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
         const networkFailure = error instanceof TypeError;
-        if (method === "GET" && attempt + 1 < attempts && (timedOut || interrupted || networkFailure)) continue;
-        if (timedOut) throw new GitHubError("GitHub request timed out");
-        if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.");
-        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error");
+        if (retryableMethod && attempt + 1 < attempts && (timedOut || interrupted || networkFailure)) continue;
+        if (timedOut) throw new GitHubError("GitHub request timed out", undefined, "timeout");
+        if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.", undefined, "interrupted");
+        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error", undefined, "network");
         throw error;
       }
       if (!response.ok) {
@@ -171,6 +174,15 @@ export class GistClient {
     return this.write(gistId, snapshot);
   }
 
+  private async findSnapshotByHash(expectedHash: string): Promise<RemoteSnapshot | undefined> {
+    const discovered = await this.discover();
+    for (const candidate of discovered) {
+      const remote = await this.read(candidate.gistId);
+      if (await snapshotHash(remote.snapshot) === expectedHash) return remote;
+    }
+    return undefined;
+  }
+
   private async write(gistId: string | undefined, snapshot: Snapshot): Promise<RemoteSnapshot> {
     const canonical = validateSnapshot(snapshot);
     const content = serializeSnapshot(canonical);
@@ -184,14 +196,28 @@ export class GistClient {
       files: { [SNAPSHOT_FILE_NAME]: { content } }
     };
     if (!gistId) body.public = false;
-    const gist = await this.request<GistResponse>(
-      gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists",
-      {
-        method: gistId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+    let gist: GistResponse;
+    try {
+      gist = await this.request<GistResponse>(
+        gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists",
+        {
+          method: gistId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        }
+      );
+    } catch (error) {
+      if (!gistId && error instanceof GitHubError && error.kind) {
+        const recovered = await this.findSnapshotByHash(expectedHash);
+        if (recovered) return recovered;
+        throw new GitHubError(
+          "GitHub may have received the create request, but Firstlight could not confirm the result. The POST was not repeated to avoid creating a duplicate Gist; retry from the app so discovery can run again.",
+          undefined,
+          error.kind
+        );
       }
-    );
+      throw error;
+    }
     this.assertSecretGist(gist);
     const file = gist.files[SNAPSHOT_FILE_NAME];
     let remote: RemoteSnapshot;

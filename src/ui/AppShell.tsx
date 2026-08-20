@@ -1,5 +1,5 @@
 import type { DynamicEffect } from "../shared/dynamicEffects";
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
 import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
 import {
@@ -158,6 +158,7 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
         <button
           className={`folder-row ${isFolder ? "is-folder" : ""}`}
           disabled={!isFolder && item.url !== undefined && !canOpenBookmark(item.url)}
+          aria-expanded={isFolder ? isExpanded : undefined}
           onClick={() => {
             if (isFolder) {
               setExpanded((current) => {
@@ -273,6 +274,7 @@ interface OptionPickerProps {
   value: number;
   options: number[];
   suffix: string;
+  label: string;
   onChange: (value: number) => void;
 }
 
@@ -296,34 +298,39 @@ function useDismissablePicker(open: boolean, setOpen: (open: boolean) => void): 
   return ref;
 }
 
-function OptionPicker({ value, options, suffix, onChange }: OptionPickerProps) {
+function OptionPicker({ value, options, suffix, label, onChange }: OptionPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
+  const menuId = useId();
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{value} {suffix}</span><b className="picker-arrow" /></button>
-    {open && <div className="picker-menu">{options.map((option) => <button key={option} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option}</button>)}</div>}
+    <button className="picker-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value} {suffix}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu" id={menuId} role="listbox" aria-label={label}>{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option}</button>)}</div>}
   </div>;
 }
 
-function ClockPicker({ value, onChange }: { value: ClockPosition; onChange: (value: ClockPosition) => void }) {
+function ClockPicker({ value, label, onChange }: { value: ClockPosition; label: string; onChange: (value: ClockPosition) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
+  const menuId = useId();
   const options: ClockPosition[] = ["hidden", "left", "center", "right"];
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" /></button>
-    {open && <div className="picker-menu clock-menu">{options.map((option) => <button key={option} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
+    <button className="picker-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu clock-menu" id={menuId} role="listbox" aria-label={label}>{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
   </div>;
 }
 
 function DynamicEffectPicker({ value, onChange }: { value: DynamicEffect; onChange: (value: DynamicEffect) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
+  const menuId = useId();
   const effects = DYNAMIC_EFFECT_DEFINITIONS;
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" /></button>
-    {open && <div className="picker-menu effect-menu">{effects.map((effect) => {
+    <button className="picker-trigger" aria-label="Dynamic background effect" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu effect-menu" id={menuId} role="listbox" aria-label="Dynamic background effect">{effects.map((effect) => {
       return <button
         key={effect.id}
+        role="option"
+        aria-selected={effect.id === value}
         className={effect.id === value ? "selected" : ""}
         disabled={!effect.implemented}
         onClick={() => {
@@ -353,6 +360,7 @@ function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spe
     <label>{spec.label} <b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b></label>
     <input
       type="range"
+      aria-label={spec.label}
       min={spec.min}
       max={spec.max}
       step={spec.step}
@@ -363,15 +371,15 @@ function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spe
 }
 
 function DynamicEffectColorField({ value, spec, onChange }: { value: string; spec: ColorParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><input className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
+  return <div className="setting-line"><label>{spec.label}</label><input aria-label={spec.label} className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
 }
 
 function DynamicEffectToggleField({ value, spec, onChange }: { value: boolean; spec: ToggleParameterDefinition; onChange: (value: boolean) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><VisibilityToggle visible={value} onChange={onChange} /></div>;
+  return <div className="setting-line"><label>{spec.label}</label><VisibilityToggle label={spec.label} visible={value} onChange={onChange} /></div>;
 }
 
 function DynamicEffectSelectField({ value, spec, onChange }: { value: string; spec: SelectParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><div className="segmented">{spec.options.map((option) => <button key={option.value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
+  return <div className="setting-line"><label>{spec.label}</label><div className="segmented" role="group" aria-label={spec.label}>{spec.options.map((option) => <button key={option.value} aria-pressed={option.value === value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
 }
 
 function DynamicEffectParameterRows({ definitions, values, onChange }: {
@@ -517,26 +525,28 @@ function baselineDynamicBackground(
 function SearchTextPicker({ value, onChange }: { value: ClockPosition; onChange: (value: ClockPosition) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
+  const menuId = useId();
   const options: ClockPosition[] = ["hidden", "left", "center", "right"];
   const label = value === "hidden" ? "HIDE" : value.toUpperCase();
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{label}</span><b className="picker-arrow" /></button>
-    {open && <div className="picker-menu clock-menu">{options.map((option) => <button key={option} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option === "hidden" ? "HIDE" : option.toUpperCase()}</button>)}</div>}
+    <button className="picker-trigger" aria-label="Search text position" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{label}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu clock-menu" id={menuId} role="listbox" aria-label="Search text position">{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option === "hidden" ? "HIDE" : option.toUpperCase()}</button>)}</div>}
   </div>;
 }
 
 function AlignmentPicker({ value, onChange }: { value: BookmarkAlignment; onChange: (value: BookmarkAlignment) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismissablePicker(open, setOpen);
+  const menuId = useId();
   const options: BookmarkAlignment[] = ["left", "center", "right"];
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" /></button>
-    {open && <div className="picker-menu alignment-menu">{options.map((option) => <button key={option} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
+    <button className="picker-trigger" aria-label="Bookmark alignment" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu alignment-menu" id={menuId} role="listbox" aria-label="Bookmark alignment">{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
   </div>;
 }
 
-function VisibilityToggle({ visible, onChange }: { visible: boolean; onChange: (visible: boolean) => void }) {
-  return <div className="segmented visibility-toggle"><button className={visible ? "selected" : ""} onClick={() => onChange(true)}>SHOW</button><button className={!visible ? "selected" : ""} onClick={() => onChange(false)}>HIDE</button></div>;
+function VisibilityToggle({ visible, label, onChange }: { visible: boolean; label: string; onChange: (visible: boolean) => void }) {
+  return <div className="segmented visibility-toggle" role="group" aria-label={label}><button aria-pressed={visible} className={visible ? "selected" : ""} onClick={() => onChange(true)}>SHOW</button><button aria-pressed={!visible} className={!visible ? "selected" : ""} onClick={() => onChange(false)}>HIDE</button></div>;
 }
 
 function useReducedMotion(): boolean {
@@ -792,7 +802,7 @@ export function AppShell(props: Props) {
       "--foreground-color": state.settings.foreground.color,
       "--bookmark-font-size": `${state.settings.foreground.fontSize}px`,
       "--ui-font-size": `${state.settings.foreground.fontSize}px`,
-      "--hover-color": state.settings.features.hoverColor,
+      "--theme-color": state.settings.features.themeColor,
       "--grid-columns": gridFit.columns,
       "--grid-rows": state.settings.layout.rows,
       "--grid-width": `${gridWidth}px`,
@@ -866,6 +876,7 @@ export function AppShell(props: Props) {
               <button
                 className="bookmark-cell"
                 disabled={!folder && item.url !== undefined && !canOpenBookmark(item.url)}
+                aria-expanded={folder ? active : undefined}
                 onClick={() => folder ? setOpenFolder(active ? null : item) : open(item)}
               >
                 <span className="cell-content">
@@ -879,23 +890,23 @@ export function AppShell(props: Props) {
         </div></>}
       </section>
 
-      <button ref={settingsTriggerRef} className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings"><Settings size={20} strokeWidth={1.8} /></button>
+      <button ref={settingsTriggerRef} className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-controls="settings-drawer"><Settings size={20} strokeWidth={1.8} /></button>
 
       {settingsOpen && <><div className="drawer-backdrop" aria-hidden="true" onClick={closeSettings} />
-      <aside ref={settingsDrawerRef} className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
+      <aside id="settings-drawer" ref={settingsDrawerRef} className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
         <header className="drawer-header"><span id="settings-title" className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span></header>
         <div className="drawer-content">
           <section className="settings-section">
             <div className="section-title"><span>BOOKMARKS</span>{!readonly && <button disabled={busy} onClick={props.onOpenBookmarkManager}>OPEN MANAGER ↗</button>}</div>
-            <div className="setting-line"><label>Open target</label><div className="segmented"><button className={state.settings.openTarget === "new-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "new-tab" })}>NEW TAB</button><button className={state.settings.openTarget === "current-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "current-tab" })}>CURRENT</button></div></div>
-            {!readonly && <div className="setting-line"><label>Chrome import</label><button className="inline-action" disabled={busy} onClick={props.onImportBookmarks}>IMPORT</button></div>}
+            <div className="setting-line"><label>Open target</label><div className="segmented" role="group" aria-label="Open target"><button aria-pressed={state.settings.openTarget === "new-tab"} className={state.settings.openTarget === "new-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "new-tab" })}>NEW TAB</button><button aria-pressed={state.settings.openTarget === "current-tab"} className={state.settings.openTarget === "current-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "current-tab" })}>CURRENT</button></div></div>
+            {!readonly && <div className="setting-line"><label>Chrome import</label><button aria-label="Import Chrome bookmarks" className="inline-action" disabled={busy} onClick={props.onImportBookmarks}>IMPORT</button></div>}
           </section>
 
           <section className="settings-section">
             <div className="section-title"><span>BACKGROUND</span></div>
-            <div className="setting-line"><label>Mode</label><div className="segmented"><button className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from })}>SOLID</button><button className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle })}>GRADIENT</button><button className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
+            <div className="setting-line"><label>Mode</label><div className="segmented" role="group" aria-label="Background mode"><button aria-pressed={state.settings.background.type === "solid"} className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from })}>SOLID</button><button aria-pressed={state.settings.background.type === "gradient"} className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle })}>GRADIENT</button><button aria-pressed={state.settings.background.type === "dynamic"} className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
             {state.settings.background.type === "solid" ? (
-              <div className="setting-line"><label>Color</label><input className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div>
+              <div className="setting-line"><label>Color</label><input aria-label="Background color" className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div>
             ) : activeBackground.type === "dynamic" ? (
               (() => {
                 const dynamicBackground = activeBackground;
@@ -906,12 +917,13 @@ export function AppShell(props: Props) {
                     value={dynamicBackground.effect}
                     onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
                   /></div>
-                  <div className="setting-line"><label>Colors</label><div className="color-pair"><input type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>
-                  {effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
+                  <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Dynamic background colors"><input aria-label="Dynamic background start color" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="Dynamic background end color" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>
+                  {effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input aria-label="Dynamic background angle" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
                   <div className="setting-line size-line speed-line">
                     <label>Speed <b>{dynamicBackground.speed}</b></label>
                     <input
                       type="range"
+                      aria-label="Dynamic background speed"
                       min={effectDefinition.speed.min}
                       max={effectDefinition.speed.max}
                       step={effectDefinition.speed.step}
@@ -928,37 +940,37 @@ export function AppShell(props: Props) {
               })()
             ) : (
               <div>
-                <div className="setting-line"><label>Colors</label><div className="color-pair"><input type="color" value={state.settings.background.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input type="color" value={state.settings.background.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
-                <div className="setting-line angle-line"><label>Angle <b>{state.settings.background.angle}°</b></label><input type="range" min="0" max="360" value={state.settings.background.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
+                <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Gradient colors"><input aria-label="Gradient start color" type="color" value={state.settings.background.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input aria-label="Gradient end color" type="color" value={state.settings.background.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
+                <div className="setting-line angle-line"><label>Angle <b>{state.settings.background.angle}°</b></label><input aria-label="Gradient angle" type="range" min="0" max="360" value={state.settings.background.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
               </div>
             )}
           </section>
 
           <section className="settings-section">
             <div className="section-title"><span>FOREGROUND</span></div>
-            <div className="setting-line"><label>Theme</label><div className="segmented"><button className={state.settings.features.themeMode === "dark" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}>DARK</button><button className={state.settings.features.themeMode === "light" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}>LIGHT</button></div></div>
-            <div className="setting-line"><label>Text color</label><input className="color-input" type="color" value={state.settings.foreground.color} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, color: event.target.value } })} /></div>
-            <div className="setting-line"><label>Theme color</label><input className="color-input" type="color" value={state.settings.features.hoverColor} onChange={(event) => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverColor: event.target.value } })} /></div>
-            <div className="setting-line size-line"><label>Text size <b>{state.settings.foreground.fontSize}px</b></label><input type="range" min="12" max="24" step="1" value={state.settings.foreground.fontSize} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, fontSize: Number(event.target.value) } })} /></div>
-            <div className="setting-line"><label>Clock</label><ClockPicker value={state.settings.clockPosition} onChange={(clockPosition) => updateSettings({ ...state.settings, clockPosition })} /></div>
-            <div className="setting-line"><label>Clock seconds</label><VisibilityToggle visible={state.settings.features.clockSeconds} onChange={(clockSeconds) => updateSettings({ ...state.settings, features: { ...state.settings.features, clockSeconds } })} /></div>
+            <div className="setting-line"><label>Theme</label><div className="segmented" role="group" aria-label="Interface theme"><button aria-pressed={state.settings.features.themeMode === "dark"} className={state.settings.features.themeMode === "dark" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}>DARK</button><button aria-pressed={state.settings.features.themeMode === "light"} className={state.settings.features.themeMode === "light" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}>LIGHT</button></div></div>
+            <div className="setting-line"><label>Text color</label><input aria-label="Text color" className="color-input" type="color" value={state.settings.foreground.color} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, color: event.target.value } })} /></div>
+            <div className="setting-line"><label>Theme color</label><input aria-label="Theme color" className="color-input" type="color" value={state.settings.features.themeColor} onChange={(event) => updateSettings({ ...state.settings, features: { ...state.settings.features, themeColor: event.target.value } })} /></div>
+            <div className="setting-line size-line"><label>Text size <b>{state.settings.foreground.fontSize}px</b></label><input aria-label="Text size" type="range" min="12" max="24" step="1" value={state.settings.foreground.fontSize} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, fontSize: Number(event.target.value) } })} /></div>
+            <div className="setting-line"><label>Clock</label><ClockPicker label="Clock position" value={state.settings.clockPosition} onChange={(clockPosition) => updateSettings({ ...state.settings, clockPosition })} /></div>
+            <div className="setting-line"><label>Clock seconds</label><VisibilityToggle label="Clock seconds" visible={state.settings.features.clockSeconds} onChange={(clockSeconds) => updateSettings({ ...state.settings, features: { ...state.settings.features, clockSeconds } })} /></div>
           </section>
 
           <section className="settings-section">
             <div className="section-title"><span>HOME GRID</span><i>{state.settings.layout.rows} × {state.settings.layout.columns}</i></div>
-            <div className="setting-line"><label>Rows</label><OptionPicker value={state.settings.layout.rows} options={[1, 2, 3, 4, 5, 6, 7, 8]} suffix="ROWS" onChange={(rows) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, rows } })} /></div>
-            <div className="setting-line"><label>Columns</label><OptionPicker value={state.settings.layout.columns} options={[2, 3, 4, 5, 6, 7, 8]} suffix="COLS" onChange={(columns) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, columns } })} /></div>
+            <div className="setting-line"><label>Rows</label><OptionPicker label="Home grid rows" value={state.settings.layout.rows} options={[1, 2, 3, 4, 5, 6, 7, 8]} suffix="ROWS" onChange={(rows) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, rows } })} /></div>
+            <div className="setting-line"><label>Columns</label><OptionPicker label="Home grid columns" value={state.settings.layout.columns} options={[2, 3, 4, 5, 6, 7, 8]} suffix="COLS" onChange={(columns) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, columns } })} /></div>
             <div className="setting-line"><label>Bookmark alignment</label><AlignmentPicker value={state.settings.layout.bookmarkAlignment} onChange={(bookmarkAlignment) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, bookmarkAlignment } })} /></div>
-            <div className="setting-line"><label>Bookmark details</label><VisibilityToggle visible={state.settings.features.bookmarkDetails} onChange={(bookmarkDetails) => updateSettings({ ...state.settings, features: { ...state.settings.features, bookmarkDetails } })} /></div>
-            <div className="setting-line"><label>Hover highlight</label><div className="segmented"><button className={state.settings.features.hoverStyle === "underline" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "underline" } })}>LINE</button><button className={state.settings.features.hoverStyle === "box" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "box" } })}>BOX</button><button className={state.settings.features.hoverStyle === "block" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "block" } })}>BLOCK</button></div></div>
-            <div className="setting-line"><label>Search</label><ClockPicker value={state.settings.features.searchPosition} onChange={(searchPosition) => { if (searchPosition === "hidden") { setQuery(""); setSearchResultsOpen(false); } updateSettings({ ...state.settings, features: { ...state.settings.features, searchPosition } }); }} /></div>
-            <div className="setting-line"><label>Search icon</label><VisibilityToggle visible={state.settings.features.searchIcon} onChange={(searchIcon) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchIcon } })} /></div>
+            <div className="setting-line"><label>Bookmark details</label><VisibilityToggle label="Bookmark details" visible={state.settings.features.bookmarkDetails} onChange={(bookmarkDetails) => updateSettings({ ...state.settings, features: { ...state.settings.features, bookmarkDetails } })} /></div>
+            <div className="setting-line"><label>Hover highlight</label><div className="segmented" role="group" aria-label="Hover highlight"><button aria-pressed={state.settings.features.hoverStyle === "underline"} className={state.settings.features.hoverStyle === "underline" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "underline" } })}>LINE</button><button aria-pressed={state.settings.features.hoverStyle === "box"} className={state.settings.features.hoverStyle === "box" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "box" } })}>BOX</button><button aria-pressed={state.settings.features.hoverStyle === "block"} className={state.settings.features.hoverStyle === "block" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "block" } })}>BLOCK</button></div></div>
+            <div className="setting-line"><label>Search</label><ClockPicker label="Search position" value={state.settings.features.searchPosition} onChange={(searchPosition) => { if (searchPosition === "hidden") { setQuery(""); setSearchResultsOpen(false); } updateSettings({ ...state.settings, features: { ...state.settings.features, searchPosition } }); }} /></div>
+            <div className="setting-line"><label>Search icon</label><VisibilityToggle label="Search icon" visible={state.settings.features.searchIcon} onChange={(searchIcon) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchIcon } })} /></div>
             <div className="setting-line"><label>Search text</label><SearchTextPicker value={state.settings.features.searchText} onChange={(searchText) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchText } })} /></div>
           </section>
 
           <section className="settings-section">
             <div className="section-title"><span>SYNC</span></div>
-            <div className="token-row"><input type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token)}>{state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}</button></div>
+            <div className="token-row"><input aria-label="GitHub token" type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token)}>{state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}</button></div>
             {!readonly && <div className="compact-actions sync-actions">
               <button disabled={busy || !state.tokenConfigured} onClick={props.onUpload}>UPLOAD</button>
               <button

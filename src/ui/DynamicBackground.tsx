@@ -1,14 +1,15 @@
-import { useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import type { Background } from "../shared/model";
 import type { DynamicEffect } from "../shared/dynamicEffects";
-import { Balatro } from "./backgrounds/Balatro";
-import { DotGrid } from "./backgrounds/DotGrid";
-import { Iridescence } from "./backgrounds/Iridescence";
-import { LiquidChrome } from "./backgrounds/LiquidChrome";
-import { MoltenMetal } from "./backgrounds/MoltenMetal";
-import { NeuroNoise } from "./backgrounds/NeuroNoise";
-import { Topography } from "./backgrounds/Topography";
-import { WebThreads } from "./backgrounds/WebThreads";
+
+const Balatro = lazy(() => import("./backgrounds/Balatro").then((module) => ({ default: module.Balatro })));
+const DotGrid = lazy(() => import("./backgrounds/DotGrid").then((module) => ({ default: module.DotGrid })));
+const Iridescence = lazy(() => import("./backgrounds/Iridescence").then((module) => ({ default: module.Iridescence })));
+const LiquidChrome = lazy(() => import("./backgrounds/LiquidChrome").then((module) => ({ default: module.LiquidChrome })));
+const MoltenMetal = lazy(() => import("./backgrounds/MoltenMetal").then((module) => ({ default: module.MoltenMetal })));
+const NeuroNoise = lazy(() => import("./backgrounds/NeuroNoise").then((module) => ({ default: module.NeuroNoise })));
+const Topography = lazy(() => import("./backgrounds/Topography").then((module) => ({ default: module.Topography })));
+const WebThreads = lazy(() => import("./backgrounds/WebThreads").then((module) => ({ default: module.WebThreads })));
 
 type DynamicBackgroundSettings = Extract<Background, { type: "dynamic" }>;
 
@@ -554,14 +555,14 @@ export function DynamicBackground({ background }: Props) {
     parameters: background.parameters ?? EMPTY_PARAMETERS
   } satisfies Pick<DynamicBackgroundSettings, "from" | "to" | "speed" | "parameters">;
 
-  if (background.effect === "topography") return <Topography {...effectProps} />;
-  if (background.effect === "webThreads") return <WebThreads {...effectProps} />;
-  if (background.effect === "moltenMetal") return <MoltenMetal className="dynamic-background" {...effectProps} />;
-  if (background.effect === "iridescence") return <Iridescence className="dynamic-background" {...effectProps} />;
-  if (background.effect === "liquidChrome") return <LiquidChrome className="dynamic-background" {...effectProps} />;
-  if (background.effect === "balatro") return <Balatro className="dynamic-background" {...effectProps} />;
-  if (background.effect === "dotGrid") return <DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} />;
-  if (background.effect === "neuroNoise") return <NeuroNoise className="dynamic-background" {...effectProps} />;
+  if (background.effect === "topography") return <Suspense fallback={null}><Topography {...effectProps} /></Suspense>;
+  if (background.effect === "webThreads") return <Suspense fallback={null}><WebThreads {...effectProps} /></Suspense>;
+  if (background.effect === "moltenMetal") return <Suspense fallback={null}><MoltenMetal className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "iridescence") return <Suspense fallback={null}><Iridescence className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "liquidChrome") return <Suspense fallback={null}><LiquidChrome className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "balatro") return <Suspense fallback={null}><Balatro className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "dotGrid") return <Suspense fallback={null}><DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} /></Suspense>;
+  if (background.effect === "neuroNoise") return <Suspense fallback={null}><NeuroNoise className="dynamic-background" {...effectProps} /></Suspense>;
 
   return <canvas ref={canvasRef} className="dynamic-background" aria-hidden="true" />;
 }

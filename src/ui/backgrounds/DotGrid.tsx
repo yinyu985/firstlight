@@ -442,7 +442,7 @@ export function DotGrid({
 
     if (typeof ResizeObserver !== "undefined" && typeof resizeWindow !== "undefined") {
       resizeObserver = new ResizeObserver(buildGrid);
-      wrapperRef.current && resizeObserver.observe(wrapperRef.current);
+      if (wrapperRef.current) resizeObserver.observe(wrapperRef.current);
     } else {
       resizeWindow.addEventListener("resize", buildGrid);
     }

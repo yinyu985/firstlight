@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GistClient, normalizeGitHubToken } from "../shared/gist";
+import { createDataBookmarkId, dataBookmarkViewerUrl, stageDataBookmark } from "../shared/dataBookmarkStore";
 import { DEFAULT_SETTINGS, canonicalSettings, snapshotFrom, type Snapshot, type SyncedSettings } from "../shared/model";
 import type { AppState } from "../shared/protocol";
 import { validateSnapshot } from "../shared/snapshot";
-import { prepareBookmarkUrl } from "../shared/url";
+import { isDataBookmarkUrl } from "../shared/url";
 import { AppShell } from "./AppShell";
 
 const TOKEN_KEY = "firstlight.online.token";
-const GIST_KEY = "firstlight.online.gist";
 const SETTINGS_KEY = "firstlight.online.settings";
 
 function readStorage(key: string): string | undefined {
@@ -69,12 +69,12 @@ export function OnlineApp() {
   const settingsTimer = useRef<number | undefined>(undefined);
   const pendingSettings = useRef<SyncedSettings | undefined>(undefined);
 
-  const connect = useCallback(async (token: string, requestedGist?: string) => {
+  const connect = useCallback(async (token: string) => {
     const generation = ++connectGeneration.current;
     setBusy(true);
     setError(undefined);
     if (!token.trim()) {
-      const stored = removeStorage(TOKEN_KEY) && removeStorage(GIST_KEY);
+      const stored = removeStorage(TOKEN_KEY);
       if (generation !== connectGeneration.current) return;
       setState(onlineState(undefined, undefined, undefined, "Disconnected"));
       if (!stored) setError("Unable to clear the saved token from this browser");
@@ -84,9 +84,7 @@ export function OnlineApp() {
     try {
       const normalizedToken = normalizeGitHubToken(token);
       const client = new GistClient(normalizedToken);
-      const found = requestedGist
-        ? [{ gistId: requestedGist, htmlUrl: "", updatedAt: "" }]
-        : await client.discover();
+      const found = await client.discover();
       if (generation !== connectGeneration.current) return;
       if (!found.length) {
         const stored = writeStorage(TOKEN_KEY, normalizedToken);
@@ -96,7 +94,7 @@ export function OnlineApp() {
         const newest = [...found].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
         const remote = await client.read(newest.gistId);
         if (generation !== connectGeneration.current) return;
-        const stored = writeStorage(TOKEN_KEY, normalizedToken) && writeStorage(GIST_KEY, remote.gistId);
+        const stored = writeStorage(TOKEN_KEY, normalizedToken);
         setState(onlineState(remote.snapshot, normalizedToken, remote.htmlUrl, "Remote snapshot / read only", remote.gistId));
         if (!stored) setError("Connected, but the connection could not be saved locally");
       }
@@ -137,10 +135,22 @@ export function OnlineApp() {
   };
 
   const openBookmark = (url: string) => {
-    const prepared = prepareBookmarkUrl(url);
-    if (state.settings.openTarget === "current-tab") window.location.assign(prepared.url);
-    else window.open(prepared.url, "_blank", "noopener,noreferrer");
-    if (prepared.dispose) window.setTimeout(prepared.dispose, 60_000);
+    if (!isDataBookmarkUrl(url)) {
+      if (state.settings.openTarget === "current-tab") window.location.assign(url);
+      else window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const id = createDataBookmarkId();
+    const viewerUrl = dataBookmarkViewerUrl(id, window.location.href);
+    if (state.settings.openTarget === "new-tab") window.open(viewerUrl, "_blank", "noopener,noreferrer");
+    void stageDataBookmark(id, url)
+      .then(() => {
+        if (state.settings.openTarget === "current-tab") window.location.assign(viewerUrl);
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Unable to open the data bookmark");
+      });
   };
 
   return <AppShell
