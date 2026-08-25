@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dynamicTimeScale, hexToOklab } from "./DynamicBackground";
-import { resolveBalatroSettings } from "./backgrounds/Balatro";
+import { dynamicTimeScale, hexToOklab, resolveCellWallThickness } from "./DynamicBackground";
 import {
   dotGridInertiaStep,
   dotGridProximityMix,
@@ -9,8 +8,6 @@ import {
   resolveDotGridSettings
 } from "./backgrounds/DotGrid";
 import { resolveLiquidChromeSettings } from "./backgrounds/LiquidChrome";
-import { resolveTopographySettings } from "./backgrounds/Topography";
-import { resolveWebThreadsSettings } from "./backgrounds/WebThreads";
 
 describe("Dynamic background", () => {
   it("maps the complete speed range monotonically and gives the fast end real range", () => {
@@ -33,54 +30,11 @@ describe("Dynamic background", () => {
     expect(white[0] - black[0]).toBeGreaterThan(0.99);
   });
 
-  it("routes every Topography control into its live renderer settings", () => {
-    const settings = resolveTopographySettings({
-      speed: 1.25,
-      from: "#112233",
-      to: "#ddeeff",
-      parameters: {
-        color3: "#4488cc",
-        morphAmount: 5.5,
-        morphSpeed: 0.17,
-        bands: 7,
-        thickness: 0.2,
-        scale: 2.4,
-        pixelSize: 24,
-        glow: 1.1,
-        colorMode: "alternating",
-        contrast: 2.4,
-        brightness: 1.45,
-        fillBands: true,
-        opacity: 0.35,
-        grain: false,
-        grainIntensity: 0.22,
-        mouseInteraction: false,
-        mouseRadius: 0.8,
-        mouseStrength: 1.2
-      }
-    });
-
-    expect(settings).toMatchObject({
-      speed: 1.25,
-      morphAmount: 5.5,
-      morphSpeed: 0.17,
-      bands: 7,
-      thickness: 0.2,
-      scale: 2.4,
-      pixelSize: 24,
-      glow: 1.1,
-      colorMode: "alternating",
-      contrast: 2.4,
-      brightness: 1.45,
-      fillBands: true,
-      opacity: 0.35,
-      grain: false,
-      grainIntensity: 0.22,
-      mouseInteraction: false,
-      mouseRadius: 0.8,
-      mouseStrength: 1.2
-    });
-    expect(settings.colors.mid).toEqual([0x44 / 255, 0x88 / 255, 0xcc / 255]);
+  it("keeps Cells wall thickness live, bounded, and backward compatible", () => {
+    expect(resolveCellWallThickness(undefined)).toBe(1);
+    expect(resolveCellWallThickness({ wallThickness: 1.65 })).toBe(1.65);
+    expect(resolveCellWallThickness({ wallThickness: 0.1 })).toBe(0.3);
+    expect(resolveCellWallThickness({ wallThickness: 9 })).toBe(2.5);
   });
 
   it("caps Liquid Chrome amplitude at the product limit", () => {
@@ -88,35 +42,30 @@ describe("Dynamic background", () => {
     expect(resolveLiquidChromeSettings({ parameters: {} }).amplitude).toBe(0.2);
   });
 
-  it("keeps each Threads appearance control on its own renderer setting", () => {
-    const settings = resolveWebThreadsSettings({
+  it("restores the original Chrome renderer settings", () => {
+    const settings = resolveLiquidChromeSettings({
+      from: "#ff0000",
+      to: "#0000ff",
       parameters: {
-        color3: "#123456",
-        glow: 0.011,
-        falloff: 0.73,
-        thickness: 2.15,
-        brightness: 1.35,
-        opacity: 0.42,
-        mouseInteraction: true,
-        mouseStrength: 0.85
+        frequencyX: 4.5,
+        frequencyY: 6,
+        color3: "#00ff00",
+        contrast: 1.8,
+        lighting: 0.35
       }
     });
-
     expect(settings).toMatchObject({
-      glow: 0.011,
-      falloff: 0.73,
-      thickness: 2.15,
-      brightness: 1.35,
-      opacity: 0.42,
-      mouseInteraction: true,
-      mouseStrength: 0.85
+      frequencyX: 4.5,
+      frequencyY: 6,
+      amplitude: 0.2,
+      contrast: 1.8,
+      lighting: 0.35,
+      baseColor: [0.425, 0.15, 0.425]
     });
-    expect(settings.colors.color3).toEqual([0x12 / 255, 0x34 / 255, 0x56 / 255]);
-  });
-
-  it("uses the visible Balatro speed control as the shader spin speed", () => {
-    expect(resolveBalatroSettings({ speed: 0.1, parameters: { spinSpeed: 20 } }).spinSpeed).toBe(0.1);
-    expect(resolveBalatroSettings({ speed: 20, parameters: { spinSpeed: 0.1 } }).spinSpeed).toBe(20);
+    expect(resolveLiquidChromeSettings({ parameters: { mouseInteraction: false, mouseStrength: 2.4 } })).toMatchObject({
+      mouseInteraction: false,
+      mouseStrength: 2.4
+    });
   });
 
   it("keeps Dot Grid interaction controls independent and wired into impulse physics", () => {

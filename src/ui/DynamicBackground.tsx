@@ -2,14 +2,9 @@ import { Suspense, lazy, useEffect, useRef } from "react";
 import type { Background } from "../shared/model";
 import type { DynamicEffect } from "../shared/dynamicEffects";
 
-const Balatro = lazy(() => import("./backgrounds/Balatro").then((module) => ({ default: module.Balatro })));
 const DotGrid = lazy(() => import("./backgrounds/DotGrid").then((module) => ({ default: module.DotGrid })));
-const Iridescence = lazy(() => import("./backgrounds/Iridescence").then((module) => ({ default: module.Iridescence })));
 const LiquidChrome = lazy(() => import("./backgrounds/LiquidChrome").then((module) => ({ default: module.LiquidChrome })));
-const MoltenMetal = lazy(() => import("./backgrounds/MoltenMetal").then((module) => ({ default: module.MoltenMetal })));
 const NeuroNoise = lazy(() => import("./backgrounds/NeuroNoise").then((module) => ({ default: module.NeuroNoise })));
-const Topography = lazy(() => import("./backgrounds/Topography").then((module) => ({ default: module.Topography })));
-const WebThreads = lazy(() => import("./backgrounds/WebThreads").then((module) => ({ default: module.WebThreads })));
 
 type DynamicBackgroundSettings = Extract<Background, { type: "dynamic" }>;
 
@@ -22,6 +17,7 @@ interface FrameConfig {
   from: [number, number, number];
   speed: number;
   to: [number, number, number];
+  wallThickness: number;
 }
 
 interface Renderer {
@@ -36,6 +32,7 @@ interface Renderer {
     seed: WebGLUniformLocation | null;
     time: WebGLUniformLocation | null;
     to: WebGLUniformLocation | null;
+    wallThickness: WebGLUniformLocation | null;
   };
 }
 
@@ -129,50 +126,35 @@ vec2 scenePoint() {
 
 const FLOW_SHADER = `
 void main() {
-  vec2 point = scenePoint() * vec2(0.72, 0.92);
+  vec2 point = scenePoint() * vec2(0.76, 0.95);
   vec2 seedA = u_seed * 0.071;
   vec2 seedB = u_seed.yx * 0.093 + vec2(5.2, 1.3);
-  vec2 domain = vec2(
-    fbm(point * 0.72 + seedA + vec2(u_time * 0.12, u_time * 0.08)),
-    fbm(point * 0.72 + seedB + vec2(-u_time * 0.09, u_time * 0.13))
-  );
-  vec2 warp = domain - 0.5;
-  vec2 flowingPoint = point + 1.75 * warp;
-  float broad = fbm(flowingPoint * 1.04 + seedB * 0.47 + vec2(u_time * 0.18, -u_time * 0.13));
-  float current = fbm((point - 1.15 * warp.yx) * 0.58 + seedA * 0.63 + vec2(-u_time * 0.10, u_time * 0.15));
-  float detail = noise(flowingPoint * 1.85 + seedA + vec2(u_time * 0.07, u_time * 0.11));
-  float field = broad * 0.68 + current * 0.27 + detail * 0.05;
-  float separated = clamp((field - 0.5) * 3.15 + 0.5, 0.0, 1.0);
-  float blend = separated * separated * (3.0 - 2.0 * separated);
-  gl_FragColor = vec4(oklabToSrgb(mix(u_from, u_to, blend)), 1.0);
-}
-`;
-
-const AURORA_SHADER = `
-float auroraRibbon(vec2 point, float level, float phase, float speed) {
-  float wave = sin(point.x * (1.45 + level * 0.22) + u_time * speed + phase) * 0.16;
-  wave += sin(point.x * 3.4 - u_time * speed * 0.47 + phase * 1.7) * 0.065;
-  float grain = fbm(vec2(point.x * 1.25 + phase * 4.0, point.y * 0.52 + u_time * 0.035));
-  float ridge = point.y - (0.12 + level * 0.22 + wave + (grain - 0.5) * 0.24);
-  return exp(-abs(ridge) * (13.0 - level * 1.5));
-}
-
-void main() {
-  vec2 point = scenePoint() * vec2(0.78, 0.70);
-  float fade = smoothstep(-1.20, -0.10, point.y) * (1.0 - smoothstep(0.62, 1.12, point.y));
-  float ribbonA = auroraRibbon(point, 0.0, 0.0, 0.12);
-  float ribbonB = auroraRibbon(point, 1.0, 2.1, 0.095);
-  float ribbonC = auroraRibbon(point, 2.0, 4.0, 0.075);
-  float light = (ribbonA * 0.78 + ribbonB * 0.48 + ribbonC * 0.26) * fade;
-  float haze = fbm(point * vec2(0.62, 0.35) + u_seed * 0.028 + vec2(u_time * 0.025, 0.0));
-  vec3 color = mix(darkColor(), midColor(), 0.10 + haze * 0.10);
-  color += accentColor() * light * 0.26;
-  color += midColor() * light * 0.10;
+  float largeBend = fbm(vec2(point.x * 0.28 - u_time * 0.10, point.y * 0.48) + seedA);
+  float crossBend = fbm(vec2(point.x * 0.16 + u_time * 0.035, point.y * 0.78) + seedB);
+  float currentY = point.y + (largeBend - 0.5) * 0.92 + (crossBend - 0.5) * 0.32;
+  float broadCurrent = fbm(vec2(point.x * 0.38 - u_time * 0.18, currentY * 1.35) + seedA * 0.57);
+  float fastCurrent = fbm(vec2(point.x * 0.68 - u_time * 0.34, currentY * 3.20) + seedB * 0.43);
+  float fineCurrent = fbm(vec2(
+    point.x * 1.04 - u_time * 0.52,
+    currentY * 5.40 + (fastCurrent - 0.5) * 0.58
+  ) + seedA * 0.91);
+  float microCurrent = noise(vec2(
+    point.x * 1.72 - u_time * 0.76,
+    currentY * 8.20 + (fineCurrent - 0.5) * 0.42
+  ) + seedB * 0.68);
+  float field = broadCurrent * 0.40 + fastCurrent * 0.34 + fineCurrent * 0.20 + microCurrent * 0.06;
+  float blend = smoothstep(0.22, 0.78, field);
+  blend = clamp(blend + (fineCurrent - 0.5) * 0.16 + (microCurrent - 0.5) * 0.05, 0.02, 0.98);
+  float sheen = smoothstep(0.50, 0.76, fineCurrent) * smoothstep(0.30, 0.78, broadCurrent);
+  vec3 color = oklabToSrgb(mix(u_from, u_to, blend));
+  color = mix(color, accentColor(), sheen * 0.026);
   gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
 
 const CELLS_SHADER = `
+uniform float u_wall_thickness;
+
 vec2 cellFeature(vec2 cell) {
   vec2 random = vec2(hash21(cell + u_seed), hash21(cell + u_seed + 19.17));
   return 0.5 + 0.36 * sin(u_time * 0.34 + random * 6.2831853);
@@ -199,7 +181,7 @@ void main() {
       }
     }
   }
-  float boundary = 1.0 - smoothstep(0.015, 0.075, second - nearest);
+  float boundary = 1.0 - smoothstep(0.015 * u_wall_thickness, 0.075 * u_wall_thickness, second - nearest);
   float core = 1.0 - smoothstep(0.0, 0.72, nearest);
   vec3 color = mix(darkColor(), midColor(), 0.06 + identity * 0.22 + core * 0.10);
   color += accentColor() * boundary * 0.18;
@@ -207,79 +189,9 @@ void main() {
 }
 `;
 
-const SNOW_SHADER = `
-vec2 snowPoint() {
-  float shortSide = max(1.0, min(u_resolution.x, u_resolution.y));
-  return (2.0 * gl_FragCoord.xy - u_resolution) / shortSide;
-}
-
-float snowLayer(
-  vec2 point,
-  float scale,
-  float fallSpeed,
-  float wind,
-  float radius,
-  float opacity,
-  float layer
-) {
-  vec2 grid = point * scale;
-  // Every layer advances from the same speed-controlled clock. Layer speed is
-  // applied once so changing the shared speed scales every flake consistently.
-  float time = u_time;
-  grid.x += time * wind;
-  grid.x += sin(point.y * 1.7 + time * 0.55 + layer * 2.3) * (0.18 + abs(wind) * 0.45);
-  grid.y += time * fallSpeed;
-
-  vec2 cell = floor(grid);
-  vec2 local = fract(grid) - 0.5;
-  float randomA = hash21(cell + u_seed + vec2(layer * 13.1, -layer * 7.7));
-  float randomB = hash21(cell.yx + u_seed.yx + vec2(layer * 5.3, layer * 11.9));
-  vec2 center = vec2(randomA, randomB) - 0.5;
-  center *= 0.70;
-
-  vec2 particle = local - center;
-  particle.x += sin(u_time * (0.42 + randomB * 0.35) + randomA * 6.2831853) * 0.035;
-  float distanceToParticle = length(particle);
-  float pixel = 2.0 * scale / max(1.0, min(u_resolution.x, u_resolution.y));
-  float particleRadius = max(radius * mix(0.72, 1.25, randomB), pixel * 1.15);
-  float core = 1.0 - smoothstep(
-    max(0.0, particleRadius - pixel * 0.85),
-    particleRadius + pixel * 0.85,
-    distanceToParticle
-  );
-  float halo = 1.0 - smoothstep(
-    particleRadius,
-    particleRadius * 2.8 + pixel,
-    distanceToParticle
-  );
-  float presence = smoothstep(0.12, 0.30, hash21(cell + u_seed * 0.61 - vec2(layer)));
-  float shimmer = 0.88 + 0.12 * sin(u_time * 0.55 + randomA * 6.2831853 + layer);
-  return (core + halo * 0.18) * presence * opacity * shimmer;
-}
-
-void main() {
-  vec2 point = snowPoint();
-  float cloud = fbm(point * 0.48 + u_seed * 0.025 + vec2(u_time * 0.010, 0.0));
-  float backgroundMix = clamp(0.06 + cloud * 0.18 + point.y * 0.025, 0.0, 1.0);
-  vec3 base = oklabToSrgb(mix(u_from, u_to, backgroundMix));
-
-  float backLayer = snowLayer(point, 15.0, 0.42, -0.10, 0.030, 0.24, 1.7);
-  float midLayer = snowLayer(point, 9.5, 0.72, -0.16, 0.040, 0.48, 4.2);
-  float frontLayer = snowLayer(point, 5.5, 1.08, -0.23, 0.055, 0.78, 9.3);
-  float snow = max(0.0, backLayer + midLayer + frontLayer);
-  float snowMask = 1.0 - exp(-snow * 1.35);
-  vec3 snowColor = mix(vec3(0.94, 0.97, 1.0), oklabToSrgb(u_to), 0.12);
-  float vignette = 1.0 - smoothstep(0.65, 1.75, length(point * vec2(0.54, 0.34)));
-  vec3 color = mix(base, snowColor, snowMask * mix(0.78, 1.0, vignette));
-  gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
-}
-`;
-
 const EFFECT_SHADERS: Partial<Record<DynamicEffect, string>> = {
   flow: FLOW_SHADER,
-  aurora: AURORA_SHADER,
-  cells: CELLS_SHADER,
-  snow: SNOW_SHADER
+  cells: CELLS_SHADER
 };
 
 const EMPTY_PARAMETERS: NonNullable<DynamicBackgroundSettings["parameters"]> = Object.freeze({});
@@ -329,6 +241,13 @@ export function hexToOklab(hex: string): [number, number, number] {
 export function dynamicTimeScale(speed: number): number {
   const normalized = Math.max(0, Math.min(1, (speed - 10) / 10));
   return 0.54 + 1.67 * normalized ** 1.6;
+}
+
+export function resolveCellWallThickness(parameters: DynamicBackgroundSettings["parameters"]): number {
+  const value = parameters?.wallThickness;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0.3, Math.min(2.5, value))
+    : 1;
 }
 
 function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
@@ -401,7 +320,8 @@ function createRenderer(canvas: HTMLCanvasElement, effect: DynamicEffect): Rende
       resolution: gl.getUniformLocation(program, "u_resolution"),
       seed: gl.getUniformLocation(program, "u_seed"),
       time: gl.getUniformLocation(program, "u_time"),
-      to: gl.getUniformLocation(program, "u_to")
+      to: gl.getUniformLocation(program, "u_to"),
+      wallThickness: gl.getUniformLocation(program, "u_wall_thickness")
     }
   };
 }
@@ -430,13 +350,15 @@ export function DynamicBackground({ background }: Props) {
     angle: background.angle,
     from: hexToOklab(background.from),
     speed: background.speed,
-    to: hexToOklab(background.to)
+    to: hexToOklab(background.to),
+    wallThickness: resolveCellWallThickness(background.parameters)
   });
   frameConfigRef.current = {
     angle: background.angle,
     from: hexToOklab(background.from),
     speed: background.speed,
-    to: hexToOklab(background.to)
+    to: hexToOklab(background.to),
+    wallThickness: resolveCellWallThickness(background.parameters)
   };
 
   useEffect(() => {
@@ -490,7 +412,7 @@ export function DynamicBackground({ background }: Props) {
 
       const { gl, program, position, uniforms } = renderer;
       const config = frameConfigRef.current;
-      const effectAngle = background.effect === "snow" ? 0.0 : config.angle * Math.PI / 180;
+      const effectAngle = config.angle * Math.PI / 180;
       gl.useProgram(program);
       gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
       gl.enableVertexAttribArray(position);
@@ -501,6 +423,7 @@ export function DynamicBackground({ background }: Props) {
       gl.uniform1f(uniforms.angle, effectAngle);
       gl.uniform3f(uniforms.from, config.from[0], config.from[1], config.from[2]);
       gl.uniform3f(uniforms.to, config.to[0], config.to[1], config.to[2]);
+      gl.uniform1f(uniforms.wallThickness, config.wallThickness);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       schedule();
     };
@@ -555,12 +478,7 @@ export function DynamicBackground({ background }: Props) {
     parameters: background.parameters ?? EMPTY_PARAMETERS
   } satisfies Pick<DynamicBackgroundSettings, "from" | "to" | "speed" | "parameters">;
 
-  if (background.effect === "topography") return <Suspense fallback={null}><Topography {...effectProps} /></Suspense>;
-  if (background.effect === "webThreads") return <Suspense fallback={null}><WebThreads {...effectProps} /></Suspense>;
-  if (background.effect === "moltenMetal") return <Suspense fallback={null}><MoltenMetal className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "iridescence") return <Suspense fallback={null}><Iridescence className="dynamic-background" {...effectProps} /></Suspense>;
   if (background.effect === "liquidChrome") return <Suspense fallback={null}><LiquidChrome className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "balatro") return <Suspense fallback={null}><Balatro className="dynamic-background" {...effectProps} /></Suspense>;
   if (background.effect === "dotGrid") return <Suspense fallback={null}><DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} /></Suspense>;
   if (background.effect === "neuroNoise") return <Suspense fallback={null}><NeuroNoise className="dynamic-background" {...effectProps} /></Suspense>;
 

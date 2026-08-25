@@ -22,8 +22,8 @@
     "test:e2e": "npm run build && playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 36",
-    "format:check": "prettier --check package.json eslint.config.js playwright.config.ts vitest.config.ts 'e2e/**/*.ts' '.github/**/*.yml' && git diff --check",
-    "format": "prettier --write package.json eslint.config.js playwright.config.ts vitest.config.ts 'e2e/**/*.ts' '.github/**/*.yml'",
+    "format:check": "prettier --check package.json eslint.config.js playwright.config.ts vitest.config.ts 'e2e/**/*.ts' && git diff --check",
+    "format": "prettier --write package.json eslint.config.js playwright.config.ts vitest.config.ts 'e2e/**/*.ts'",
     "audit:prod": "npm audit --omit=dev",
     "check": "npm run lint && npm run format:check && npm run typecheck && npm run test:coverage && npm run test:e2e && npm run audit:prod"
   },

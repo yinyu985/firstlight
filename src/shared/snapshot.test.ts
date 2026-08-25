@@ -126,13 +126,6 @@ describe("parseSnapshot", () => {
             rotation: 12,
             speed: 7
           }
-        },
-        snow: {
-          from: "#445566",
-          to: "#556677",
-          angle: 44,
-          speed: 18,
-          parameters: {}
         }
       }
     };
@@ -147,6 +140,13 @@ describe("parseSnapshot", () => {
         to: "#99aabb",
         angle: 180,
         speed: 17,
+        parameters: {}
+      },
+      snow: {
+        from: "#445566",
+        to: "#556677",
+        angle: 44,
+        speed: 18,
         parameters: {}
       }
     };
@@ -176,13 +176,7 @@ describe("parseSnapshot", () => {
         rotation: 12
       }
     });
-    expect(parsed.config.dynamicEffectProfiles?.snow).toEqual({
-      from: "#445566",
-      to: "#556677",
-      angle: 44,
-      speed: 18,
-      parameters: {}
-    });
+    expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("snow");
     if (!flowProfile) throw new Error("Flow profile missing");
     expect(flowProfile.parameters).toEqual({});
     expect(parsed.config.dynamicEffectProfiles?.cells).toMatchObject({
@@ -190,14 +184,14 @@ describe("parseSnapshot", () => {
       to: "#99aabb",
       angle: 180,
       speed: 17,
-      parameters: {}
+      parameters: { wallThickness: 1 }
     });
   });
 
   it("migrates legacy ferrofluid background profile to flow", () => {
     const normalizedSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], {
       ...DEFAULT_SETTINGS,
-      background: { type: "dynamic", effect: "moltenMetal", from: "#102030", to: "#304050", angle: 145, speed: 999, parameters: { mouseInteraction: "bad" as never, scale: "x" as never, color3: "#ffffff", detail: 4 } }
+      background: { type: "dynamic", effect: "liquidChrome", from: "#102030", to: "#304050", angle: 145, speed: 999, parameters: {} }
     }))) as unknown as { config: { dynamicEffectProfiles: unknown } };
     normalizedSnapshot.config.dynamicEffectProfiles = {
       ferrofluid: {
@@ -209,12 +203,12 @@ describe("parseSnapshot", () => {
       }
     };
     const normalized = parseSnapshot(JSON.stringify(normalizedSnapshot));
-    const moltenBackground = normalized.config.background;
-    if (moltenBackground.type !== "dynamic") throw new Error("Expected dynamic background");
+    const currentBackground = normalized.config.background;
+    if (currentBackground.type !== "dynamic") throw new Error("Expected dynamic background");
     const flowProfile = normalized.config.dynamicEffectProfiles?.flow;
     if (!flowProfile) throw new Error("Expected migrated flow profile");
 
-    expect(moltenBackground.speed).toBe(2.5);
+    expect(currentBackground.speed).toBe(2);
     expect(flowProfile.speed).toBe(14);
     expect(flowProfile.parameters).toEqual({});
     expect(normalized.config.dynamicEffectProfiles).not.toHaveProperty("ferrofluid");
@@ -222,66 +216,6 @@ describe("parseSnapshot", () => {
 
   it("normalizes renderer-used parameters that were previously under-modeled", () => {
     const settingsByEffect: Record<string, SyncedSettings> = {
-      topography: {
-        ...DEFAULT_SETTINGS,
-        background: {
-          type: "dynamic",
-          effect: "topography",
-          from: "#102030",
-          to: "#304050",
-          angle: 145,
-          speed: 1,
-          parameters: {}
-        }
-      },
-      webThreads: {
-        ...DEFAULT_SETTINGS,
-        background: {
-          type: "dynamic",
-          effect: "webThreads",
-          from: "#102030",
-          to: "#304050",
-          angle: 145,
-          speed: 1,
-          parameters: {}
-        }
-      },
-      moltenMetal: {
-        ...DEFAULT_SETTINGS,
-        background: {
-          type: "dynamic",
-          effect: "moltenMetal",
-          from: "#102030",
-          to: "#304050",
-          angle: 145,
-          speed: 1,
-          parameters: {}
-        }
-      },
-      balatro: {
-        ...DEFAULT_SETTINGS,
-        background: {
-          type: "dynamic",
-          effect: "balatro",
-          from: "#102030",
-          to: "#304050",
-          angle: 145,
-          speed: 1,
-          parameters: {}
-        }
-      },
-      iridescence: {
-        ...DEFAULT_SETTINGS,
-        background: {
-          type: "dynamic",
-          effect: "iridescence",
-          from: "#102030",
-          to: "#304050",
-          angle: 145,
-          speed: 1,
-          parameters: {}
-        }
-      },
       liquidChrome: {
         ...DEFAULT_SETTINGS,
         background: {
@@ -308,57 +242,21 @@ describe("parseSnapshot", () => {
       }
     };
 
-    const topographySnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.topography))) as { config: { background: { parameters: Record<string, unknown> } } };
-    topographySnapshot.config.background.parameters.opacity = 1.8;
-    const parsedTopography = parseSnapshot(JSON.stringify(topographySnapshot));
-
-    const webThreadsSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.webThreads))) as { config: { background: { parameters: Record<string, unknown> } } };
-    webThreadsSnapshot.config.background.parameters.opacity = 1.25;
-    webThreadsSnapshot.config.background.parameters.mouseStrength = 0.45;
-    const parsedWebThreads = parseSnapshot(JSON.stringify(webThreadsSnapshot));
-
-    const moltenSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.moltenMetal))) as { config: { background: { parameters: Record<string, unknown> } } };
-    moltenSnapshot.config.background.parameters.opacity = 0.4;
-    moltenSnapshot.config.background.parameters.contrast = "bad" as never;
-    const parsedMolten = parseSnapshot(JSON.stringify(moltenSnapshot));
-
-    const iridescenceSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.iridescence))) as { config: { background: { parameters: Record<string, unknown> } } };
-    iridescenceSnapshot.config.background.parameters.color3 = "#c3d4e5";
-    iridescenceSnapshot.config.background.parameters.scale = 1.2;
-    iridescenceSnapshot.config.background.parameters.brightness = 1.25;
-    iridescenceSnapshot.config.background.parameters.contrast = 2.2;
-    iridescenceSnapshot.config.background.parameters.lighting = 0.4;
-    const parsedIridescence = parseSnapshot(JSON.stringify(iridescenceSnapshot));
-
     const liquidChromeSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.liquidChrome))) as { config: { background: { parameters: Record<string, unknown> } } };
     liquidChromeSnapshot.config.background.parameters.color3 = "#fefefe";
     liquidChromeSnapshot.config.background.parameters.interactive = false;
     liquidChromeSnapshot.config.background.parameters.brightness = 1.4;
-    liquidChromeSnapshot.config.background.parameters.contrast = 2.0;
+    liquidChromeSnapshot.config.background.parameters.contrast = 2;
     liquidChromeSnapshot.config.background.parameters.lighting = 0.2;
     const parsedLiquid = parseSnapshot(JSON.stringify(liquidChromeSnapshot));
-
-    const balatroSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.balatro))) as { config: { background: { parameters: Record<string, unknown> } } };
-    balatroSnapshot.config.background.parameters.spinSpeed = 0.07;
-    const parsedBalatro = parseSnapshot(JSON.stringify(balatroSnapshot));
 
     const dotGridSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.dotGrid))) as { config: { background: { parameters: Record<string, unknown> } } };
     const parsedDotGrid = parseSnapshot(JSON.stringify(dotGridSnapshot));
 
-    expect(parsedTopography.config.background).toMatchObject({ type: "dynamic", parameters: { opacity: 1 } });
-    expect(parsedWebThreads.config.background).toMatchObject({ type: "dynamic", parameters: { opacity: 1, mouseStrength: 0.45 } });
-    expect(parsedMolten.config.background).toMatchObject({ type: "dynamic", parameters: { opacity: 0.4 } });
-    expect(parsedIridescence.config.background).toMatchObject({
-      type: "dynamic",
-      parameters: { amplitude: 1.2, color3: "#c3d4e5", brightness: 1.25, contrast: 2.2, lighting: 0.4 }
-    });
     expect(parsedLiquid.config.background).toMatchObject({
       type: "dynamic",
       parameters: { mouseInteraction: false, color3: "#fefefe", brightness: 1.4, contrast: 2, lighting: 0.2 }
     });
-    expect(parsedBalatro.config.background).toMatchObject({ type: "dynamic", speed: 1 });
-    if (parsedBalatro.config.background.type !== "dynamic") throw new Error("Expected dynamic Balatro background");
-    expect(parsedBalatro.config.background.parameters).not.toHaveProperty("spinSpeed");
     expect(parsedDotGrid.config.background).toMatchObject({
       type: "dynamic",
       parameters: { dotSize: 16, gap: 32, proximity: 150, speedTrigger: 100, maxSpeed: 5000 }
@@ -370,7 +268,7 @@ describe("parseSnapshot", () => {
       ...DEFAULT_SETTINGS,
       background: {
         type: "dynamic",
-        effect: "aurora",
+        effect: "cells",
         from: "#102030",
         to: "#304050",
         angle: 145,
@@ -406,7 +304,7 @@ describe("parseSnapshot", () => {
   it("accepts the current dynamic background structure", () => {
     const snapshot = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
-      background: { type: "dynamic", effect: "aurora", from: "#102030", to: "#70d0c0", angle: 210, speed: 10 }
+      background: { type: "dynamic", effect: "cells", from: "#102030", to: "#70d0c0", angle: 210, speed: 10 }
     });
     expect(parseSnapshot(JSON.stringify(snapshot)).config.background).toEqual(snapshot.config.background);
   });
@@ -438,11 +336,7 @@ describe("parseSnapshot", () => {
     legacyGrid.config.background.effect = "grid";
     expect(parseSnapshot(JSON.stringify(legacyGrid)).config.background).toMatchObject({ effect: "flow" });
 
-    const legacyParticles = JSON.parse(JSON.stringify(snapshot));
-    legacyParticles.config.background.effect = "particles";
-    expect(parseSnapshot(JSON.stringify(legacyParticles)).config.background).toMatchObject({ effect: "snow" });
-
-    for (const effect of ["dither", "rings"]) {
+    for (const effect of ["particles", "dither", "rings", "aurora", "snow", "topography", "webThreads", "moltenMetal", "iridescence", "balatro"]) {
       const removed = JSON.parse(JSON.stringify(snapshot));
       removed.config.background.effect = effect;
       expect(parseSnapshot(JSON.stringify(removed)).config.background).toMatchObject({ effect: "flow" });
@@ -679,29 +573,33 @@ describe("dynamic effect range schema", () => {
     }
   });
 
-  it("uses practical product-tuned ranges for Topography, Liquid Chrome, Balatro, and DotGrid", () => {
+  it("keeps exactly the five selected dynamic effects", () => {
+    expect(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => definition.id)).toEqual([
+      "flow",
+      "cells",
+      "liquidChrome",
+      "dotGrid",
+      "neuroNoise"
+    ]);
+  });
+
+  it("uses practical product-tuned ranges for Cells, Liquid Chrome, and DotGrid", () => {
     const byId = Object.fromEntries(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => [definition.id, definition]));
 
-    const topography = byId.topography;
-    if (!topography) throw new Error("Missing topography effect definition");
+    const cells = byId.cells;
+    if (!cells) throw new Error("Missing cells effect definition");
     const dotGrid = byId.dotGrid;
     if (!dotGrid) throw new Error("Missing dotGrid effect definition");
     const liquidChrome = byId.liquidChrome;
     if (!liquidChrome) throw new Error("Missing liquidChrome effect definition");
-    const balatro = byId.balatro;
-    if (!balatro) throw new Error("Missing balatro effect definition");
 
-    expect(topography.speed).toMatchObject({ min: 0, max: 2, defaultValue: 0.35 });
-    expect(findNumericRange(topography, "bands")).toMatchObject({ min: 1, max: 8, step: 1, integer: true, defaultValue: 2 });
-    expect(findNumericRange(topography, "contrast").min).toBeGreaterThanOrEqual(1);
-    expect(findNumericRange(topography, "contrast").max).toBeLessThanOrEqual(3);
-    expect(findNumericRange(topography, "brightness").min).toBeGreaterThanOrEqual(0.4);
-    expect(findNumericRange(topography, "brightness").max).toBeLessThanOrEqual(1.6);
+    expect(findNumericRange(cells, "wallThickness")).toMatchObject({ min: 0.3, max: 2.5, step: 0.05, defaultValue: 1 });
 
     expect(findNumericRange(liquidChrome, "amplitude")).toMatchObject({ min: 0.02, max: 0.3, defaultValue: 0.2 });
-    expect(balatro.speed).toMatchObject({ min: 0.1, max: 20, defaultValue: 7 });
-    expect(balatro.parameters.some((parameter) => parameter.key === "spinSpeed")).toBe(false);
-
+    expect(findNumericRange(liquidChrome, "frequencyX")).toMatchObject({ min: 0.5, max: 12, defaultValue: 3 });
+    expect(findNumericRange(liquidChrome, "frequencyY")).toMatchObject({ min: 0.5, max: 12, defaultValue: 2 });
+    expect(findNumericRange(liquidChrome, "contrast")).toMatchObject({ min: 0, max: 3, defaultValue: 1 });
+    expect(findNumericRange(liquidChrome, "lighting")).toMatchObject({ min: 0, max: 1, defaultValue: 0 });
     expect(dotGrid.speed).toMatchObject({ min: 5, max: 22, defaultValue: 10 });
     expect(findNumericRange(dotGrid, "dotSize").max).toBeLessThanOrEqual(120);
     expect(findNumericRange(dotGrid, "dotSize").min).toBeGreaterThanOrEqual(2);

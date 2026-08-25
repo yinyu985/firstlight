@@ -23,7 +23,7 @@ function readSnapshot(inputPath) {
     if (raw.trimStart().startsWith('"notes"')) {
       return JSON.parse(`{${raw}`);
     }
-    throw new Error(`invalid JSON: ${error.message}`);
+    throw new Error(`invalid JSON: ${error.message}`, { cause: error });
   }
 }
 
