@@ -1,4 +1,5 @@
 import type { Background } from "../shared/model";
+import { NEURO_NOISE_DEFAULT_COLORS } from "../shared/dynamicEffects";
 
 interface Rgb {
   r: number;
@@ -105,6 +106,10 @@ function interpolateOklab(from: string, to: string, amount: number): string {
 
 export function sampleBackground(background: Background, sample: BackgroundSample): string {
   if (background.type === "solid") return background.color;
+  if (background.type === "dynamic" && background.effect === "neuroNoise") {
+    const colorBack = background.parameters?.colorBack;
+    return typeof colorBack === "string" ? colorBack : NEURO_NOISE_DEFAULT_COLORS.back;
+  }
   const radians = background.angle * Math.PI / 180;
   const dx = Math.sin(radians);
   const dy = -Math.cos(radians);

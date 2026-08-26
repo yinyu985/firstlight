@@ -1,7 +1,7 @@
 import type { DynamicEffect } from "../shared/dynamicEffects";
 import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
-import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, SyncedSettings, SyncNote } from "../shared/model";
+import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, DynamicBackground as DynamicBackgroundSettings, DynamicEffectProfile, DynamicEffectProfiles, SyncedSettings, SyncNote } from "../shared/model";
 import {
   type ColorParameterDefinition,
   type DynamicEffectParameterDefinition,
@@ -9,6 +9,7 @@ import {
   type RangeParameterDefinition,
   getDynamicEffectDefinition,
   DYNAMIC_EFFECT_DEFINITIONS,
+  NEURO_NOISE_DEFAULT_COLORS,
   type SelectParameterDefinition,
   type ToggleParameterDefinition,
   normalizeDynamicParameters,
@@ -75,9 +76,18 @@ function fitGrid(columns: number, viewportWidth: number): GridFit {
   };
 }
 
-function backgroundImageCss(background: Background): string {
+export function backgroundImageCss(background: Background): string {
   if (background.type === "solid") return "none";
+  if (background.type === "dynamic" && background.effect === "neuroNoise") return "none";
   return `linear-gradient(${background.angle}deg in oklab, ${background.from}, ${background.to})`;
+}
+
+export function backgroundColorCss(background: Background): string {
+  if (background.type === "solid") return background.color;
+  if (background.type === "dynamic" && background.effect === "neuroNoise") return "#070b12";
+  return background.type === "dynamic"
+    ? `color-mix(in oklab, ${background.from} 50%, ${background.to})`
+    : background.from;
 }
 
 function countUrls(nodes: BookmarkItem[]): number {
@@ -456,17 +466,21 @@ function DynamicEffectParameterRows({ definitions, values, onChange }: {
   </>;
 }
 
-type DynamicBackground = Extract<Background, { type: "dynamic" }>;
-type DynamicEffectProfiles = NonNullable<SyncedSettings["dynamicEffectProfiles"]>;
-type DynamicEffectProfile = NonNullable<DynamicEffectProfiles[DynamicEffect]>;
-
 function normalizeDynamicAngle(angle: number): number {
   const safe = Number.isFinite(angle) ? angle : 0;
   const wrapped = safe % 360;
   return wrapped < 0 ? wrapped + 360 : wrapped;
 }
 
-function normalizeDynamicBackground(background: DynamicBackground): DynamicBackground {
+function normalizeDynamicBackground(background: DynamicBackgroundSettings): DynamicBackgroundSettings {
+  if (background.effect === "neuroNoise") {
+    return {
+      type: "dynamic",
+      effect: "neuroNoise",
+      speed: normalizeDynamicSpeed("neuroNoise", background.speed),
+      parameters: normalizeDynamicParameters("neuroNoise", background.parameters)
+    };
+  }
   return {
     ...background,
     angle: normalizeDynamicAngle(background.angle),
@@ -475,8 +489,14 @@ function normalizeDynamicBackground(background: DynamicBackground): DynamicBackg
   };
 }
 
-function profileFromDynamicBackground(background: DynamicBackground): DynamicEffectProfile {
+function profileFromDynamicBackground(background: DynamicBackgroundSettings): DynamicEffectProfile {
   const normalized = normalizeDynamicBackground(background);
+  if (normalized.effect === "neuroNoise") {
+    return {
+      speed: normalized.speed,
+      parameters: normalized.parameters
+    };
+  }
   return {
     from: normalized.from,
     to: normalized.to,
@@ -486,14 +506,54 @@ function profileFromDynamicBackground(background: DynamicBackground): DynamicEff
   };
 }
 
+function storeDynamicProfile(profiles: DynamicEffectProfiles, background: DynamicBackgroundSettings): void {
+  const profile = profileFromDynamicBackground(background);
+  if (background.effect === "neuroNoise") {
+    profiles.neuroNoise = profile as DynamicEffectProfile<"neuroNoise">;
+  } else {
+    profiles[background.effect] = profile as DynamicEffectProfile<typeof background.effect>;
+  }
+}
+
+function genericColorSettings(background: Background): { from: string; to: string; angle: number } {
+  if (background.type === "solid") return { from: background.color, to: "#13242a", angle: 145 };
+  if (background.type === "gradient" || background.effect !== "neuroNoise") {
+    return { from: background.from, to: background.to, angle: background.angle };
+  }
+  const colorBack = background.parameters?.colorBack;
+  const colorMid = background.parameters?.colorMid;
+  return {
+    from: typeof colorBack === "string" ? colorBack : NEURO_NOISE_DEFAULT_COLORS.back,
+    to: typeof colorMid === "string" ? colorMid : NEURO_NOISE_DEFAULT_COLORS.mid,
+    angle: 145
+  };
+}
+
 function baselineDynamicBackground(
   from: Background,
   effect: DynamicEffect,
   profiles: DynamicEffectProfiles = {}
-): DynamicBackground {
+): DynamicBackgroundSettings {
   const definition = getDynamicEffectDefinition(effect);
   if (from.type === "dynamic" && from.effect === effect) {
     return normalizeDynamicBackground(from);
+  }
+  if (effect === "neuroNoise") {
+    const savedProfile = profiles.neuroNoise;
+    if (savedProfile) {
+      return {
+        type: "dynamic",
+        effect,
+        speed: normalizeDynamicSpeed(effect, savedProfile.speed),
+        parameters: normalizeDynamicParameters(effect, savedProfile.parameters)
+      };
+    }
+    return {
+      type: "dynamic",
+      effect,
+      speed: definition.speed.defaultValue,
+      parameters: normalizeDynamicParameters(effect, definition.defaultParameters)
+    };
   }
   const savedProfile = profiles[effect];
   if (savedProfile) {
@@ -507,9 +567,7 @@ function baselineDynamicBackground(
       parameters: normalizeDynamicParameters(effect, savedProfile.parameters)
     };
   }
-  const source = from.type === "solid"
-    ? { from: from.color, to: "#13242a", angle: 145 }
-    : { from: from.from, to: from.to, angle: from.angle };
+  const source = genericColorSettings(from);
 
   return {
     type: "dynamic",
@@ -768,10 +826,10 @@ export function AppShell(props: Props) {
     const dynamicEffectProfiles: DynamicEffectProfiles = { ...(state.settings.dynamicEffectProfiles ?? {}) };
     const nextBackground = background.type === "dynamic" ? normalizeDynamicBackground(background) : background;
     if (state.settings.background.type === "dynamic") {
-      dynamicEffectProfiles[state.settings.background.effect] = profileFromDynamicBackground(state.settings.background);
+      storeDynamicProfile(dynamicEffectProfiles, state.settings.background);
     }
     if (nextBackground.type === "dynamic") {
-      dynamicEffectProfiles[nextBackground.effect] = profileFromDynamicBackground(nextBackground);
+      storeDynamicProfile(dynamicEffectProfiles, nextBackground);
     }
     updateSettings({ ...state.settings, background: nextBackground, dynamicEffectProfiles });
   };
@@ -784,6 +842,7 @@ export function AppShell(props: Props) {
   };
 
   const gridWidth = gridFit.columns * gridFit.columnWidth + (gridFit.columns - 1) * gridFit.gap;
+  const modeColorSettings = genericColorSettings(state.settings.background);
   const contentFrameStyle = contentBounds ? { width: contentBounds.width, marginLeft: contentBounds.left } : undefined;
   const searchResultStyle = contentBounds ? {
     width: contentBounds.width / 2,
@@ -792,11 +851,7 @@ export function AppShell(props: Props) {
 
   return (
     <main className={`app theme-${state.settings.features.themeMode} bookmarks-${state.settings.layout.bookmarkAlignment} hover-${state.settings.features.hoverStyle} ${activeBackground.type === "dynamic" ? "background-dynamic" : ""}`} style={{
-      backgroundColor: activeBackground.type === "solid"
-        ? activeBackground.color
-        : activeBackground.type === "dynamic"
-          ? `color-mix(in oklab, ${activeBackground.from} 50%, ${activeBackground.to})`
-          : activeBackground.from,
+      backgroundColor: backgroundColorCss(activeBackground),
       backgroundImage: backgroundImageCss(activeBackground),
       color: state.settings.foreground.color,
       "--foreground-color": state.settings.foreground.color,
@@ -904,7 +959,7 @@ export function AppShell(props: Props) {
 
           <section className="settings-section">
             <div className="section-title"><span>BACKGROUND</span></div>
-            <div className="setting-line"><label>Mode</label><div className="segmented" role="group" aria-label="Background mode"><button aria-pressed={state.settings.background.type === "solid"} className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from })}>SOLID</button><button aria-pressed={state.settings.background.type === "gradient"} className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", from: state.settings.background.type === "solid" ? state.settings.background.color : state.settings.background.from, to: state.settings.background.type === "solid" ? "#13242a" : state.settings.background.to, angle: state.settings.background.type === "solid" ? 145 : state.settings.background.angle })}>GRADIENT</button><button aria-pressed={state.settings.background.type === "dynamic"} className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
+            <div className="setting-line"><label>Mode</label><div className="segmented" role="group" aria-label="Background mode"><button aria-pressed={state.settings.background.type === "solid"} className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: modeColorSettings.from })}>SOLID</button><button aria-pressed={state.settings.background.type === "gradient"} className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", ...modeColorSettings })}>GRADIENT</button><button aria-pressed={state.settings.background.type === "dynamic"} className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
             {state.settings.background.type === "solid" ? (
               <div className="setting-line"><label>Color</label><input aria-label="Background color" className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div>
             ) : activeBackground.type === "dynamic" ? (
@@ -917,8 +972,8 @@ export function AppShell(props: Props) {
                     value={dynamicBackground.effect}
                     onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
                   /></div>
-                  <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Dynamic background colors"><input aria-label="Dynamic background start color" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="Dynamic background end color" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>
-                  {effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input aria-label="Dynamic background angle" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
+                  {dynamicBackground.effect !== "neuroNoise" && <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Dynamic background colors"><input aria-label="Dynamic background start color" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="Dynamic background end color" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>}
+                  {dynamicBackground.effect !== "neuroNoise" && effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input aria-label="Dynamic background angle" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
                   <div className="setting-line size-line speed-line">
                     <label>Speed <b>{dynamicBackground.speed}</b></label>
                     <input
@@ -940,8 +995,8 @@ export function AppShell(props: Props) {
               })()
             ) : (
               <div>
-                <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Gradient colors"><input aria-label="Gradient start color" type="color" value={state.settings.background.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input aria-label="Gradient end color" type="color" value={state.settings.background.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
-                <div className="setting-line angle-line"><label>Angle <b>{state.settings.background.angle}°</b></label><input aria-label="Gradient angle" type="range" min="0" max="360" value={state.settings.background.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
+                <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Gradient colors"><input aria-label="Gradient start color" type="color" value={modeColorSettings.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input aria-label="Gradient end color" type="color" value={modeColorSettings.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
+                <div className="setting-line angle-line"><label>Angle <b>{modeColorSettings.angle}°</b></label><input aria-label="Gradient angle" type="range" min="0" max="360" value={modeColorSettings.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
               </div>
             )}
           </section>

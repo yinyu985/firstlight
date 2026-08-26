@@ -1,12 +1,12 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
-import type { Background } from "../shared/model";
+import type { DynamicBackground as DynamicBackgroundSettings } from "../shared/model";
 import type { DynamicEffect } from "../shared/dynamicEffects";
+import { NeuroNoise } from "./backgrounds/NeuroNoise";
 
 const DotGrid = lazy(() => import("./backgrounds/DotGrid").then((module) => ({ default: module.DotGrid })));
 const LiquidChrome = lazy(() => import("./backgrounds/LiquidChrome").then((module) => ({ default: module.LiquidChrome })));
-const NeuroNoise = lazy(() => import("./backgrounds/NeuroNoise").then((module) => ({ default: module.NeuroNoise })));
 
-type DynamicBackgroundSettings = Extract<Background, { type: "dynamic" }>;
+type ColorDynamicBackgroundSettings = Exclude<DynamicBackgroundSettings, { effect: "neuroNoise" }>;
 
 interface Props {
   background: DynamicBackgroundSettings;
@@ -492,7 +492,7 @@ function createSeed(): [number, number] {
   return [values[0] / 0xffffffff * 97, values[1] / 0xffffffff * 97];
 }
 
-export function DynamicBackground({ background }: Props) {
+function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgroundSettings }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const seedRef = useRef<[number, number] | null>(null);
   if (!seedRef.current) seedRef.current = createSeed();
@@ -635,16 +635,22 @@ export function DynamicBackground({ background }: Props) {
     };
   }, [background.effect]);
 
+  return <canvas ref={canvasRef} className="dynamic-background" aria-hidden="true" />;
+}
+
+export function DynamicBackground({ background }: Props) {
+  const parameters = background.parameters ?? EMPTY_PARAMETERS;
+  if (background.effect === "neuroNoise") {
+    return <NeuroNoise className="dynamic-background" speed={background.speed} parameters={parameters} />;
+  }
+
   const effectProps = {
     from: background.from,
     to: background.to,
     speed: background.speed,
-    parameters: background.parameters ?? EMPTY_PARAMETERS
-  } satisfies Pick<DynamicBackgroundSettings, "from" | "to" | "speed" | "parameters">;
-
+    parameters
+  };
   if (background.effect === "liquidChrome") return <Suspense fallback={null}><LiquidChrome className="dynamic-background" {...effectProps} /></Suspense>;
   if (background.effect === "dotGrid") return <Suspense fallback={null}><DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} /></Suspense>;
-  if (background.effect === "neuroNoise") return <Suspense fallback={null}><NeuroNoise className="dynamic-background" {...effectProps} /></Suspense>;
-
-  return <canvas ref={canvasRef} className="dynamic-background" aria-hidden="true" />;
+  return <WebGlDynamicBackground background={background} />;
 }

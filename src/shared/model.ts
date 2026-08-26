@@ -8,20 +8,23 @@ export const MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024;
 
 export type OpenTarget = "new-tab" | "current-tab";
 
+export type ColorDynamicEffect = Exclude<DynamicEffect, "neuroNoise">;
+
+export type DynamicBackground =
+  | { type: "dynamic"; effect: "neuroNoise"; speed: number; parameters?: DynamicEffectParameters }
+  | { type: "dynamic"; effect: ColorDynamicEffect; from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
+
 export type Background =
   | { type: "solid"; color: string }
   | { type: "gradient"; from: string; to: string; angle: number }
-  | { type: "dynamic"; effect: DynamicEffect; from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
+  | DynamicBackground;
 
-export interface DynamicEffectProfile {
-  from: string;
-  to: string;
-  angle: number;
-  speed: number;
-  parameters?: DynamicEffectParameters;
-}
+export type DynamicEffectProfile<Effect extends DynamicEffect = DynamicEffect> =
+  Effect extends "neuroNoise"
+    ? { speed: number; parameters?: DynamicEffectParameters }
+    : { from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
 
-export type DynamicEffectProfiles = Partial<Record<DynamicEffect, DynamicEffectProfile>>;
+export type DynamicEffectProfiles = { [Effect in DynamicEffect]?: DynamicEffectProfile<Effect> };
 
 export interface Foreground {
   color: string;
@@ -208,13 +211,13 @@ function validClockPosition(value: unknown, fallback: ClockPosition): ClockPosit
 export function normalizeSettings(input: unknown): SyncedSettings {
   const settings = settingsRecord(input);
   const rawBackground = settingsRecord(settings.background);
-  const fallbackFrom = DEFAULT_SETTINGS.background.type === "solid"
-    ? DEFAULT_SETTINGS.background.color
-    : DEFAULT_SETTINGS.background.from;
-  const fallbackTo = DEFAULT_SETTINGS.background.type === "solid"
-    ? DEFAULT_SETTINGS.background.color
-    : DEFAULT_SETTINGS.background.to;
-  const fallbackAngle = DEFAULT_SETTINGS.background.type === "solid" ? 145 : DEFAULT_SETTINGS.background.angle;
+  const fallbackFrom = "from" in DEFAULT_SETTINGS.background
+    ? DEFAULT_SETTINGS.background.from
+    : DEFAULT_SETTINGS.background.type === "solid" ? DEFAULT_SETTINGS.background.color : "#070b12";
+  const fallbackTo = "to" in DEFAULT_SETTINGS.background
+    ? DEFAULT_SETTINGS.background.to
+    : fallbackFrom;
+  const fallbackAngle = "angle" in DEFAULT_SETTINGS.background ? DEFAULT_SETTINGS.background.angle : 145;
   const background: Background = rawBackground.type === "solid"
     ? {
         type: "solid",
@@ -223,6 +226,14 @@ export function normalizeSettings(input: unknown): SyncedSettings {
     : rawBackground.type === "dynamic"
       ? (() => {
           const effect = normalizeDynamicEffect(rawBackground.effect);
+          if (effect === "neuroNoise") {
+            return {
+              type: "dynamic",
+              effect,
+              speed: normalizeDynamicSpeed(effect, rawBackground.speed),
+              parameters: normalizeDynamicParameters(effect, rawBackground.parameters)
+            };
+          }
           return {
             type: "dynamic",
             effect,
@@ -246,6 +257,13 @@ export function normalizeSettings(input: unknown): SyncedSettings {
     const effect = normalizeDynamicEffect(effectInput);
     if (!isDynamicEffect(effectInput) && dynamicEffectProfiles[effect] !== undefined) continue;
     const profile = settingsRecord(rawProfile);
+    if (effect === "neuroNoise") {
+      dynamicEffectProfiles.neuroNoise = {
+        speed: normalizeDynamicSpeed(effect, profile.speed),
+        parameters: normalizeDynamicParameters(effect, profile.parameters)
+      };
+      continue;
+    }
     dynamicEffectProfiles[effect] = {
       from: validColor(profile.from, fallbackFrom),
       to: validColor(profile.to, fallbackTo),
@@ -255,13 +273,20 @@ export function normalizeSettings(input: unknown): SyncedSettings {
     };
   }
   if (background.type === "dynamic") {
-    dynamicEffectProfiles[background.effect] = {
-      from: background.from,
-      to: background.to,
-      angle: background.angle,
-      speed: background.speed,
-      parameters: background.parameters
-    };
+    if (background.effect === "neuroNoise") {
+      dynamicEffectProfiles.neuroNoise = {
+        speed: background.speed,
+        parameters: background.parameters
+      };
+    } else {
+      dynamicEffectProfiles[background.effect] = {
+        from: background.from,
+        to: background.to,
+        angle: background.angle,
+        speed: background.speed,
+        parameters: background.parameters
+      };
+    }
   }
   const foreground = settingsRecord(settings.foreground);
   const layout = settingsRecord(settings.layout);

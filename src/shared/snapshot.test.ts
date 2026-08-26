@@ -98,6 +98,44 @@ describe("canonical snapshot order", () => {
 });
 
 describe("parseSnapshot", () => {
+  it("removes legacy generic colors and angle from Neuro backgrounds and profiles", () => {
+    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS))) as {
+      config: {
+        background: Record<string, unknown>;
+        dynamicEffectProfiles: Record<string, unknown>;
+      };
+    };
+    const parameters = {
+      colorFront: "#f4f4f4",
+      colorMid: "#248cff",
+      colorBack: "#010409",
+      brightness: 0.05,
+      scale: 1,
+      rotation: 0
+    };
+    legacy.config.background = {
+      type: "dynamic",
+      effect: "neuroNoise",
+      from: "#ff0000",
+      to: "#00ff00",
+      angle: 211,
+      speed: 1,
+      parameters
+    };
+    legacy.config.dynamicEffectProfiles.neuroNoise = {
+      from: "#ff0000",
+      to: "#00ff00",
+      angle: 211,
+      speed: 1,
+      parameters
+    };
+
+    const parsed = parseSnapshot(JSON.stringify(legacy));
+
+    expect(Object.keys(parsed.config.background)).toEqual(["type", "effect", "speed", "parameters"]);
+    expect(Object.keys(parsed.config.dynamicEffectProfiles?.neuroNoise ?? {})).toEqual(["speed", "parameters"]);
+  });
+
   it("preserves and normalizes dynamic effect profiles across serialization", () => {
     const settings: SyncedSettings = {
       ...DEFAULT_SETTINGS,
@@ -112,9 +150,6 @@ describe("parseSnapshot", () => {
       },
       dynamicEffectProfiles: {
         neuroNoise: {
-          from: "#223344",
-          to: "#334455",
-          angle: 33,
           speed: 14,
           parameters: {
             colorFront: "#abc123",
@@ -162,9 +197,6 @@ describe("parseSnapshot", () => {
       parameters: {}
     });
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise).toMatchObject({
-      from: "#223344",
-      to: "#334455",
-      angle: 33,
       speed: 4,
       parameters: {
         colorFront: "#abc123",
@@ -175,6 +207,9 @@ describe("parseSnapshot", () => {
         rotation: 12
       }
     });
+    expect(parsed.config.dynamicEffectProfiles?.neuroNoise).not.toHaveProperty("from");
+    expect(parsed.config.dynamicEffectProfiles?.neuroNoise).not.toHaveProperty("to");
+    expect(parsed.config.dynamicEffectProfiles?.neuroNoise).not.toHaveProperty("angle");
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise?.parameters).not.toHaveProperty("contrast");
     expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("snow");
     if (!flowProfile) throw new Error("Flow profile missing");

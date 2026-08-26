@@ -163,13 +163,16 @@ export function validateSnapshot(input: unknown): Snapshot {
   if (background.type === "solid" && (typeof background.color !== "string" || !HEX_COLOR.test(background.color))) {
     throw new SnapshotValidationError("Invalid solid background color");
   }
-  if ((background.type === "gradient" || background.type === "dynamic") && (
+  const backgroundUsesGenericColors = background.type === "gradient" || (
+    background.type === "dynamic" && background.effect !== "neuroNoise"
+  );
+  if (backgroundUsesGenericColors && (
     typeof background.from !== "string" || !HEX_COLOR.test(background.from) ||
     typeof background.to !== "string" || !HEX_COLOR.test(background.to)
   )) {
     throw new SnapshotValidationError("Invalid gradient settings");
   }
-  if ((background.type === "gradient" || background.type === "dynamic") && (
+  if (backgroundUsesGenericColors && (
     typeof background.angle !== "number" || !Number.isFinite(background.angle) ||
     background.angle < 0 || background.angle > 360
   )) throw new SnapshotValidationError("Invalid gradient settings");
@@ -197,12 +200,14 @@ export function validateSnapshot(input: unknown): Snapshot {
         throw new SnapshotValidationError("Invalid dynamic effect profile");
       }
       const profile = rawProfile as Record<string, unknown>;
-      if (typeof profile.from !== "string" || !HEX_COLOR.test(profile.from) ||
+      const effect = normalizeDynamicEffect(effectInput);
+      if (effect !== "neuroNoise" && (
+        typeof profile.from !== "string" || !HEX_COLOR.test(profile.from) ||
         typeof profile.to !== "string" || !HEX_COLOR.test(profile.to) ||
-        typeof profile.angle !== "number" || !Number.isFinite(profile.angle) || profile.angle < 0 || profile.angle > 360) {
+        typeof profile.angle !== "number" || !Number.isFinite(profile.angle) || profile.angle < 0 || profile.angle > 360
+      )) {
         throw new SnapshotValidationError("Invalid dynamic effect profile colors or angle");
       }
-      const effect = normalizeDynamicEffect(effectInput);
       const isCanonical = isDynamicEffect(effectInput);
       if (!isCanonical && profiles[effect] !== undefined) continue;
       const speedSpec = getDynamicEffectSpeed(effect);
@@ -210,13 +215,20 @@ export function validateSnapshot(input: unknown): Snapshot {
         (speedSpec.integer && !Number.isInteger(profile.speed)) || profile.speed < speedSpec.min || profile.speed > speedSpec.max) {
         throw new SnapshotValidationError("Invalid dynamic effect profile speed");
       }
-      profiles[effect] = {
-        from: profile.from,
-        to: profile.to,
-        angle: profile.angle,
-        speed: normalizeDynamicSpeed(effect, profile.speed),
-        parameters: normalizeDynamicParameters(effect, profile.parameters)
-      };
+      if (effect === "neuroNoise") {
+        profiles.neuroNoise = {
+          speed: normalizeDynamicSpeed(effect, profile.speed),
+          parameters: normalizeDynamicParameters(effect, profile.parameters)
+        };
+      } else {
+        profiles[effect] = {
+          from: profile.from as string,
+          to: profile.to as string,
+          angle: profile.angle as number,
+          speed: normalizeDynamicSpeed(effect, profile.speed),
+          parameters: normalizeDynamicParameters(effect, profile.parameters)
+        };
+      }
     }
     return profiles;
   };
@@ -325,6 +337,11 @@ export function validateSnapshot(input: unknown): Snapshot {
             from: background.from as string,
             to: background.to as string,
             angle: background.angle as number
+          } : normalizeDynamicEffect(background.effect) === "neuroNoise" ? {
+            type: "dynamic" as const,
+            effect: "neuroNoise" as const,
+            speed: normalizeDynamicSpeed("neuroNoise", background.speed as number),
+            parameters: normalizeDynamicParameters("neuroNoise", background.parameters)
           } : {
             type: "dynamic" as const,
             effect: normalizeDynamicEffect(background.effect),

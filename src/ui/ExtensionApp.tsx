@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SyncNote, SyncedSettings } from "../shared/model";
+import { normalizeSettings, type SyncNote, type SyncedSettings } from "../shared/model";
 import type { AppState, ExtensionRequest, ExtensionResponse } from "../shared/protocol";
 import { AppShell } from "./AppShell";
 
@@ -9,8 +9,41 @@ async function request(message: ExtensionRequest): Promise<AppState> {
   return response.state;
 }
 
+const SETTINGS_CACHE_KEY = "firstlight.extension.settings-cache";
+
+function readCachedSettings(): SyncedSettings | undefined {
+  try {
+    const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
+    return raw ? normalizeSettings(JSON.parse(raw)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCachedSettings(settings: SyncedSettings): void {
+  try {
+    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(settings));
+  } catch {
+    // The service worker remains the source of truth when page storage is unavailable.
+  }
+}
+
+function cachedStartupState(): AppState | undefined {
+  const settings = readCachedSettings();
+  if (!settings) return undefined;
+  return {
+    target: "extension",
+    bookmarks: [],
+    notes: [],
+    settings,
+    sync: { phase: "local-only", message: "Loading…" },
+    tokenConfigured: false,
+    openSetupOnLaunch: false
+  };
+}
+
 export function ExtensionApp() {
-  const [state, setState] = useState<AppState>();
+  const [state, setState] = useState<AppState | undefined>(cachedStartupState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const operationPending = useRef(false);
@@ -29,12 +62,17 @@ export function ExtensionApp() {
     settings: pendingSettings.current ?? next.settings,
     notes: pendingNotes.current ?? next.notes
   }), []);
+  const acceptState = useCallback((next: AppState) => {
+    const optimistic = withOptimisticState(next);
+    writeCachedSettings(optimistic.settings);
+    setState(optimistic);
+  }, [withOptimisticState]);
 
   useEffect(() => {
-    void request({ type: "GET_STATE" }).then(setState).catch((cause) => setError(cause.message));
+    void request({ type: "GET_STATE" }).then(acceptState).catch((cause) => setError(cause.message));
     const listener = (message: { type?: string; state?: AppState }) => {
       if (message.type === "STATE_CHANGED" && message.state) {
-        setState(withOptimisticState(message.state));
+        acceptState(message.state);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -45,7 +83,7 @@ export function ExtensionApp() {
       const submitted = pendingSettings.current;
       if (submitted) void request({ type: "SAVE_SETTINGS", settings: submitted }).catch(() => undefined);
     };
-  }, [withOptimisticState]);
+  }, [acceptState]);
 
   const act = useCallback(async (message: ExtensionRequest) => {
     if (operationPending.current) return false;
@@ -53,7 +91,7 @@ export function ExtensionApp() {
     setBusy(true);
     setError(undefined);
     try {
-      setState(withOptimisticState(await request(message)));
+      acceptState(await request(message));
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Operation failed");
@@ -63,7 +101,7 @@ export function ExtensionApp() {
       operationPending.current = false;
       setBusy(false);
     }
-  }, [withOptimisticState]);
+  }, [acceptState]);
 
   const submitPendingSettings = useCallback((): Promise<void> => {
     const submitted = pendingSettings.current;
@@ -78,7 +116,7 @@ export function ExtensionApp() {
       if (generation !== settingsGeneration.current) return;
       if (pendingSettings.current === submitted) pendingSettings.current = undefined;
       setError(undefined);
-      setState(withOptimisticState(next));
+      acceptState(next);
     });
     const handled = task.catch((cause) => {
       if (generation === settingsGeneration.current) {
@@ -99,7 +137,7 @@ export function ExtensionApp() {
       () => settingsJobs.current.delete(submitted)
     );
     return handled;
-  }, [withOptimisticState]);
+  }, [acceptState]);
   submitPendingSettingsRef.current = submitPendingSettings;
 
   const flushPendingSettings = useCallback(async () => {
@@ -138,6 +176,7 @@ export function ExtensionApp() {
 
   const saveSettings = useCallback((settings: SyncedSettings) => {
     pendingSettings.current = settings;
+    writeCachedSettings(settings);
     setState((current) => current ? { ...current, settings } : current);
     if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
     if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
@@ -155,13 +194,13 @@ export function ExtensionApp() {
       if (generation !== notesGeneration.current) return;
       if (pendingNotes.current === notes) pendingNotes.current = undefined;
       setError(undefined);
-      setState(withOptimisticState(next));
+      acceptState(next);
     } catch (cause) {
       if (generation !== notesGeneration.current) return;
       setError(cause instanceof Error ? cause.message : "Unable to save notes");
       throw cause;
     }
-  }, [withOptimisticState]);
+  }, [acceptState]);
 
   if (!state) return <div className="boot-screen"><img src="./firstlight-mark.png" alt="Firstlight" />{error && <span>{error}</span>}</div>;
 

@@ -153,10 +153,16 @@ const DOT_GRID_PARAMETERS = [
   range("returnDuration", "Return duration", 0.1, 5, 0.05, 1.5)
 ] as const;
 
+export const NEURO_NOISE_DEFAULT_COLORS = {
+  front: "#ffffff",
+  mid: "#47a6ff",
+  back: "#000000"
+} as const;
+
 const NEURO_NOISE_PARAMETERS = [
-  color("colorFront", "Front color", "#ffffff"),
-  color("colorMid", "Mid color", "#47a6ff"),
-  color("colorBack", "Back color", "#000000"),
+  color("colorFront", "Front color", NEURO_NOISE_DEFAULT_COLORS.front),
+  color("colorMid", "Mid color", NEURO_NOISE_DEFAULT_COLORS.mid),
+  color("colorBack", "Back color", NEURO_NOISE_DEFAULT_COLORS.back),
   range("brightness", "Brightness", -1, 1, 0.01, 0.05),
   range("scale", "Scale", 0.1, 4, 0.05, 1),
   range("rotation", "Rotation", -180, 180, 1, 0)
