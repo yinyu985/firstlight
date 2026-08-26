@@ -14,9 +14,13 @@ interface Props {
 
 interface FrameConfig {
   angle: number;
+  density: number;
   from: [number, number, number];
+  smokeCount: number;
+  smokeSpread: number;
   speed: number;
   to: [number, number, number];
+  turbulence: number;
   wallThickness: number;
 }
 
@@ -28,10 +32,14 @@ interface Renderer {
   uniforms: {
     angle: WebGLUniformLocation | null;
     from: WebGLUniformLocation | null;
+    density: WebGLUniformLocation | null;
     resolution: WebGLUniformLocation | null;
     seed: WebGLUniformLocation | null;
+    smokeCount: WebGLUniformLocation | null;
+    smokeSpread: WebGLUniformLocation | null;
     time: WebGLUniformLocation | null;
     to: WebGLUniformLocation | null;
+    turbulence: WebGLUniformLocation | null;
     wallThickness: WebGLUniformLocation | null;
   };
 }
@@ -152,6 +160,126 @@ void main() {
 }
 `;
 
+const SMOKE_SHADER = `
+uniform float u_density;
+uniform float u_turbulence;
+uniform float u_smoke_count;
+uniform float u_smoke_spread;
+
+float smokeSourcePosition(float slot, float aspect, float salt) {
+  float jitter = hash21(u_seed * 0.131 + vec2(salt, slot * 9.17));
+  float lanePosition = (slot + 0.5 + (jitter - 0.5) * 0.72) / max(1.0, u_smoke_count);
+  return (lanePosition - 0.5) * aspect * 0.94;
+}
+
+float smokeSourceRandom(float salt) {
+  return hash21(u_seed.yx * 0.173 + vec2(salt, salt * 1.71));
+}
+
+vec2 smokeCurl(vec2 point) {
+  float epsilon = 0.065;
+  float left = noise(point - vec2(epsilon, 0.0));
+  float right = noise(point + vec2(epsilon, 0.0));
+  float bottom = noise(point - vec2(0.0, epsilon));
+  float top = noise(point + vec2(0.0, epsilon));
+  vec2 gradient = vec2(right - left, top - bottom) / (2.0 * epsilon);
+  vec2 curl = vec2(gradient.y, -gradient.x);
+  return curl / (1.0 + length(curl));
+}
+
+float smokeTrail(vec2 point, float worldY, float origin, float phase, float size, float strength) {
+  vec2 trailSeed = u_seed * 0.029 + vec2(phase * 0.37, phase * 0.19);
+  vec2 advectedPoint = vec2(point.x, worldY);
+  vec2 largeVortex = smokeCurl(
+    advectedPoint * vec2(0.72, 0.61)
+    + trailSeed
+    + vec2(u_time * 0.031, -u_time * 0.019)
+  );
+  vec2 smallVortex = smokeCurl(
+    advectedPoint * vec2(1.83, 1.57)
+    + trailSeed.yx * 2.17
+    + vec2(-u_time * 0.047, u_time * 0.029)
+  );
+  advectedPoint -= (
+    largeVortex * 0.29
+    + smallVortex * 0.105
+  ) * (0.28 + u_turbulence * 0.72);
+
+  float broadCurl = noise(vec2(advectedPoint.y * 0.31 + phase, phase * 0.13) + trailSeed) - 0.5;
+  float smallCurl = noise(vec2(advectedPoint.y * 0.87 - phase * 0.21, phase * 0.47) + trailSeed.yx) - 0.5;
+  float fineCurl = noise(vec2(advectedPoint.y * 2.09 + phase * 0.63, phase * 0.91) + trailSeed * 2.3) - 0.5;
+  float center = origin + (
+    broadCurl * 0.34
+    + smallCurl * 0.14
+    + fineCurl * 0.04
+  ) * (0.36 + u_turbulence * 0.64);
+
+  float widthNoise = noise(vec2(advectedPoint.y * 0.39 + phase * 0.73, phase * 0.31) + trailSeed * 1.7);
+  float vortexExpansion = clamp(length(largeVortex) * 0.68 + length(smallVortex) * 0.32, 0.0, 1.0);
+  float width = (0.062 + widthNoise * 0.105 + vortexExpansion * 0.035) * u_smoke_spread * size;
+  float distanceToCore = abs(advectedPoint.x - center);
+  float body = 1.0 - smoothstep(width * 0.24, width, distanceToCore);
+  float rolledLobe = 1.0 - smoothstep(
+    width * 0.18,
+    width * 0.82,
+    abs(advectedPoint.x - center - largeVortex.x * width * 1.65)
+  );
+  body = max(body, rolledLobe * (0.32 + vortexExpansion * 0.42));
+
+  vec2 samplePoint = vec2(
+    (advectedPoint.x - center) / max(width, 0.012),
+    advectedPoint.y * 1.74 + phase
+  );
+  vec2 warp = vec2(
+    fbm(samplePoint * 0.61 + trailSeed),
+    fbm(samplePoint * 0.69 + trailSeed.yx + vec2(5.2, 1.7))
+  ) - 0.5;
+  float billow = fbm(samplePoint + warp * (0.72 + u_turbulence * 1.16));
+  float filament = noise(samplePoint * (2.31 + u_turbulence * 1.04) + warp * 2.1 + trailSeed * 3.1);
+  float texture = billow * 0.72 + filament * 0.28;
+  float wisps = smoothstep(0.23, 0.68, texture);
+  float rollingEdge = smoothstep(0.18, 0.82, vortexExpansion) * smoothstep(width * 0.18, width, distanceToCore);
+  return body * clamp(wisps + rollingEdge * 0.16, 0.0, 1.0) * strength;
+}
+
+void main() {
+  vec2 screenUv = gl_FragCoord.xy / max(u_resolution, vec2(1.0));
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 point = vec2((screenUv.x - 0.5) * aspect, screenUv.y);
+  float worldY = screenUv.y - u_time * 0.29;
+
+  float plumeDensity = 0.0;
+  for (int sourceIndex = 0; sourceIndex < 6; sourceIndex += 1) {
+    float slot = float(sourceIndex);
+    if (slot + 0.5 > u_smoke_count) continue;
+    float salt = 2.3 + slot * 7.1;
+    float source = smokeTrail(
+      point,
+      worldY,
+      smokeSourcePosition(slot, aspect, salt),
+      smokeSourceRandom(salt + 1.4) * 37.0,
+      0.72 + smokeSourceRandom(salt + 2.8) * 0.64,
+      0.68 + smokeSourceRandom(salt + 4.1) * 0.32
+    );
+    plumeDensity = 1.0 - (1.0 - plumeDensity) * (1.0 - source);
+  }
+
+  vec2 veilPoint = vec2(point.x * 1.18, worldY * 1.82);
+  float veilWarp = fbm(veilPoint * 0.62 + u_seed * 0.023) - 0.5;
+  float veil = fbm(veilPoint + vec2(veilWarp * u_turbulence, 0.0) + u_seed.yx * 0.017);
+  veil = smoothstep(0.51, 0.80, veil) * 0.20;
+
+  float smoke = clamp((plumeDensity + veil) * u_density, 0.0, 1.0);
+  float fineLight = noise(vec2(point.x * 4.1, worldY * 5.7) + u_seed * 0.07);
+  float blend = smoothstep(0.035, 0.92, smoke);
+  vec3 background = darkColor();
+  vec3 smokeColor = oklabToSrgb(mix(u_from, u_to, 0.72 + fineLight * 0.22));
+  vec3 color = mix(background, smokeColor, blend);
+  color = mix(color, accentColor(), smoothstep(0.58, 0.96, smoke) * fineLight * 0.055);
+  gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+`;
+
 const CELLS_SHADER = `
 uniform float u_wall_thickness;
 
@@ -191,6 +319,7 @@ void main() {
 
 const EFFECT_SHADERS: Partial<Record<DynamicEffect, string>> = {
   flow: FLOW_SHADER,
+  smoke: SMOKE_SHADER,
   cells: CELLS_SHADER
 };
 
@@ -248,6 +377,23 @@ export function resolveCellWallThickness(parameters: DynamicBackgroundSettings["
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0.3, Math.min(2.5, value))
     : 1;
+}
+
+export function resolveSmokeSettings(parameters: DynamicBackgroundSettings["parameters"]): {
+  density: number;
+  smokeCount: number;
+  spread: number;
+  turbulence: number;
+} {
+  const numberOr = (value: unknown, fallback: number): number => (
+    typeof value === "number" && Number.isFinite(value) ? value : fallback
+  );
+  return {
+    density: Math.max(0.35, Math.min(1.5, numberOr(parameters?.density, 0.9))),
+    smokeCount: Math.max(1, Math.min(6, Math.round(numberOr(parameters?.smokeCount, 4)))),
+    spread: Math.max(0.5, Math.min(2, numberOr(parameters?.spread, 1))),
+    turbulence: Math.max(0, Math.min(2, numberOr(parameters?.turbulence, 1)))
+  };
 }
 
 function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
@@ -316,11 +462,15 @@ function createRenderer(canvas: HTMLCanvasElement, effect: DynamicEffect): Rende
     program,
     uniforms: {
       angle: gl.getUniformLocation(program, "u_angle"),
+      density: gl.getUniformLocation(program, "u_density"),
       from: gl.getUniformLocation(program, "u_from"),
       resolution: gl.getUniformLocation(program, "u_resolution"),
       seed: gl.getUniformLocation(program, "u_seed"),
+      smokeCount: gl.getUniformLocation(program, "u_smoke_count"),
+      smokeSpread: gl.getUniformLocation(program, "u_smoke_spread"),
       time: gl.getUniformLocation(program, "u_time"),
       to: gl.getUniformLocation(program, "u_to"),
+      turbulence: gl.getUniformLocation(program, "u_turbulence"),
       wallThickness: gl.getUniformLocation(program, "u_wall_thickness")
     }
   };
@@ -346,18 +496,27 @@ export function DynamicBackground({ background }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const seedRef = useRef<[number, number] | null>(null);
   if (!seedRef.current) seedRef.current = createSeed();
+  const smokeSettings = resolveSmokeSettings(background.parameters);
   const frameConfigRef = useRef<FrameConfig>({
     angle: background.angle,
+    density: smokeSettings.density,
     from: hexToOklab(background.from),
+    smokeCount: smokeSettings.smokeCount,
+    smokeSpread: smokeSettings.spread,
     speed: background.speed,
     to: hexToOklab(background.to),
+    turbulence: smokeSettings.turbulence,
     wallThickness: resolveCellWallThickness(background.parameters)
   });
   frameConfigRef.current = {
     angle: background.angle,
+    density: smokeSettings.density,
     from: hexToOklab(background.from),
+    smokeCount: smokeSettings.smokeCount,
+    smokeSpread: smokeSettings.spread,
     speed: background.speed,
     to: hexToOklab(background.to),
+    turbulence: smokeSettings.turbulence,
     wallThickness: resolveCellWallThickness(background.parameters)
   };
 
@@ -377,7 +536,8 @@ export function DynamicBackground({ background }: Props) {
       const cssWidth = Math.max(1, bounds.width || canvas.clientWidth || window.innerWidth);
       const cssHeight = Math.max(1, bounds.height || canvas.clientHeight || window.innerHeight);
       const nativeRatio = Math.max(1, window.devicePixelRatio || 1);
-      const pixelBudgetRatio = Math.sqrt(3_000_000 / Math.max(1, cssWidth * cssHeight));
+      const pixelBudget = background.effect === "smoke" ? 1_200_000 : 3_000_000;
+      const pixelBudgetRatio = Math.sqrt(pixelBudget / Math.max(1, cssWidth * cssHeight));
       const maxViewport = renderer.gl.getParameter(renderer.gl.MAX_VIEWPORT_DIMS);
       const maxViewportWidth = (typeof maxViewport === "object" && maxViewport !== null && 0 in maxViewport && 1 in maxViewport)
         ? (maxViewport as ArrayLike<number>)[0]
@@ -412,7 +572,7 @@ export function DynamicBackground({ background }: Props) {
 
       const { gl, program, position, uniforms } = renderer;
       const config = frameConfigRef.current;
-      const effectAngle = config.angle * Math.PI / 180;
+      const effectAngle = background.effect === "smoke" ? 0 : config.angle * Math.PI / 180;
       gl.useProgram(program);
       gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
       gl.enableVertexAttribArray(position);
@@ -423,6 +583,10 @@ export function DynamicBackground({ background }: Props) {
       gl.uniform1f(uniforms.angle, effectAngle);
       gl.uniform3f(uniforms.from, config.from[0], config.from[1], config.from[2]);
       gl.uniform3f(uniforms.to, config.to[0], config.to[1], config.to[2]);
+      gl.uniform1f(uniforms.density, config.density);
+      gl.uniform1f(uniforms.smokeCount, config.smokeCount);
+      gl.uniform1f(uniforms.smokeSpread, config.smokeSpread);
+      gl.uniform1f(uniforms.turbulence, config.turbulence);
       gl.uniform1f(uniforms.wallThickness, config.wallThickness);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       schedule();

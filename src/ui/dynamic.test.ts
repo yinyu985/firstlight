@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dynamicTimeScale, hexToOklab, resolveCellWallThickness } from "./DynamicBackground";
+import { dynamicTimeScale, hexToOklab, resolveCellWallThickness, resolveSmokeSettings } from "./DynamicBackground";
 import {
   dotGridInertiaStep,
   dotGridProximityMix,
@@ -35,6 +35,16 @@ describe("Dynamic background", () => {
     expect(resolveCellWallThickness({ wallThickness: 1.65 })).toBe(1.65);
     expect(resolveCellWallThickness({ wallThickness: 0.1 })).toBe(0.3);
     expect(resolveCellWallThickness({ wallThickness: 9 })).toBe(2.5);
+  });
+
+  it("keeps Smoke density, turbulence, and spread within its visual limits", () => {
+    expect(resolveSmokeSettings(undefined)).toEqual({ density: 0.9, smokeCount: 4, turbulence: 1, spread: 1 });
+    expect(resolveSmokeSettings({ density: 0.1, smokeCount: 9.4, turbulence: 9, spread: 0.2 })).toEqual({
+      density: 0.35,
+      smokeCount: 6,
+      turbulence: 2,
+      spread: 0.5
+    });
   });
 
   it("caps Liquid Chrome amplitude at the product limit", () => {

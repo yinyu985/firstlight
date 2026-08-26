@@ -47,8 +47,8 @@ interface Props {
 
 const GRID_COLUMN_WIDTH = 210;
 const GRID_COLUMN_MIN_WIDTH = 170;
-const GRID_COLUMN_GAP = 15;
-const GRID_COLUMN_COMPACT_GAP = 8;
+const GRID_COLUMN_GAP = 1;
+const GRID_COLUMN_COMPACT_GAP = 1;
 
 interface GridFit {
   columns: number;

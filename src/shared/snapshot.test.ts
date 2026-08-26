@@ -171,11 +171,11 @@ describe("parseSnapshot", () => {
         colorMid: "#def456",
         colorBack: "#fedcba",
         brightness: 0.35,
-        contrast: 0.75,
         scale: 1.8,
         rotation: 12
       }
     });
+    expect(parsed.config.dynamicEffectProfiles?.neuroNoise?.parameters).not.toHaveProperty("contrast");
     expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("snow");
     if (!flowProfile) throw new Error("Flow profile missing");
     expect(flowProfile.parameters).toEqual({});
@@ -573,9 +573,10 @@ describe("dynamic effect range schema", () => {
     }
   });
 
-  it("keeps exactly the five selected dynamic effects", () => {
+  it("keeps exactly the six selected dynamic effects", () => {
     expect(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => definition.id)).toEqual([
       "flow",
+      "smoke",
       "cells",
       "liquidChrome",
       "dotGrid",
@@ -583,23 +584,31 @@ describe("dynamic effect range schema", () => {
     ]);
   });
 
-  it("uses practical product-tuned ranges for Cells, Liquid Chrome, and DotGrid", () => {
+  it("uses practical product-tuned ranges for Smoke, Cells, Liquid Chrome, and DotGrid", () => {
     const byId = Object.fromEntries(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => [definition.id, definition]));
 
     const cells = byId.cells;
     if (!cells) throw new Error("Missing cells effect definition");
+    const smoke = byId.smoke;
+    if (!smoke) throw new Error("Missing smoke effect definition");
     const dotGrid = byId.dotGrid;
     if (!dotGrid) throw new Error("Missing dotGrid effect definition");
     const liquidChrome = byId.liquidChrome;
     if (!liquidChrome) throw new Error("Missing liquidChrome effect definition");
+
+    expect(smoke.speed).toMatchObject({ min: 10, max: 20, defaultValue: 12 });
+    expect(findNumericRange(smoke, "smokeCount")).toMatchObject({ min: 1, max: 6, step: 1, defaultValue: 4, integer: true });
+    expect(findNumericRange(smoke, "density")).toMatchObject({ min: 0.35, max: 1.5, defaultValue: 0.9 });
+    expect(findNumericRange(smoke, "turbulence")).toMatchObject({ min: 0, max: 2, defaultValue: 1 });
+    expect(findNumericRange(smoke, "spread")).toMatchObject({ min: 0.5, max: 2, defaultValue: 1 });
 
     expect(findNumericRange(cells, "wallThickness")).toMatchObject({ min: 0.3, max: 2.5, step: 0.05, defaultValue: 1 });
 
     expect(findNumericRange(liquidChrome, "amplitude")).toMatchObject({ min: 0.02, max: 0.3, defaultValue: 0.2 });
     expect(findNumericRange(liquidChrome, "frequencyX")).toMatchObject({ min: 0.5, max: 12, defaultValue: 3 });
     expect(findNumericRange(liquidChrome, "frequencyY")).toMatchObject({ min: 0.5, max: 12, defaultValue: 2 });
-    expect(findNumericRange(liquidChrome, "contrast")).toMatchObject({ min: 0, max: 3, defaultValue: 1 });
-    expect(findNumericRange(liquidChrome, "lighting")).toMatchObject({ min: 0, max: 1, defaultValue: 0 });
+    expect(findNumericRange(liquidChrome, "contrast")).toMatchObject({ min: 0, max: 3, defaultValue: 1.05 });
+    expect(findNumericRange(liquidChrome, "lighting")).toMatchObject({ min: 0, max: 1, defaultValue: 0.55 });
     expect(dotGrid.speed).toMatchObject({ min: 5, max: 22, defaultValue: 10 });
     expect(findNumericRange(dotGrid, "dotSize").max).toBeLessThanOrEqual(120);
     expect(findNumericRange(dotGrid, "dotSize").min).toBeGreaterThanOrEqual(2);

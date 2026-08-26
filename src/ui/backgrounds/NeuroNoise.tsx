@@ -6,7 +6,6 @@ type NeuroNoiseParameters = {
   colorMid?: string;
   colorBack?: string;
   brightness?: number;
-  contrast?: number;
   scale?: number;
   rotation?: number;
 };
@@ -40,7 +39,6 @@ export function NeuroNoise({
   const colorBack = parameters?.colorBack ?? "#12171d";
 
   const brightness = getNumber(parameters?.brightness, 0.05);
-  const contrast = getNumber(parameters?.contrast, 0.3);
   const scale = clamp(getNumber(parameters?.scale, 1), 0.1, 4);
   const rotation = clamp(getNumber(parameters?.rotation, 0), -180, 180);
 
@@ -51,7 +49,7 @@ export function NeuroNoise({
       colorMid={colorMid}
       colorBack={colorBack}
       brightness={clamp(brightness, -1, 1)}
-      contrast={clamp(contrast, -1, 1)}
+      contrast={0}
       scale={scale}
       rotation={rotation}
       speed={globalSpeed}

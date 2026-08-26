@@ -66,6 +66,7 @@ export interface DynamicEffectDefinition {
 
 export const DYNAMIC_EFFECTS = [
   "flow",
+  "smoke",
   "cells",
   "liquidChrome",
   "dotGrid",
@@ -111,6 +112,13 @@ const CELLS_PARAMETERS = [
   range("wallThickness", "Wall thickness", 0.3, 2.5, 0.05, 1)
 ] as const;
 
+const SMOKE_PARAMETERS = [
+  range("smokeCount", "Smoke count", 1, 6, 1, 4, true),
+  range("density", "Density", 0.35, 1.5, 0.05, 0.9),
+  range("turbulence", "Turbulence", 0, 2, 0.05, 1),
+  range("spread", "Smoke size", 0.5, 2, 0.05, 1)
+] as const;
+
 const CELLS_SPEC: DynamicEffectDefinition = {
   id: "cells",
   label: "CELLS",
@@ -125,10 +133,10 @@ const LIQUID_CHROME_PARAMETERS = [
   range("amplitude", "Amplitude", 0.02, 0.3, 0.01, 0.2),
   range("frequencyX", "X frequency", 0.5, 12, 0.1, 3),
   range("frequencyY", "Y frequency", 0.5, 12, 0.1, 2),
-  color("color3", "Color 3", "#1a1a1a"),
+  color("color3", "Color 3", "#d7dde2"),
   range("brightness", "Brightness", 0, 2, 0.01, 1),
-  range("contrast", "Contrast", 0, 3, 0.01, 1),
-  range("lighting", "Lighting", 0, 1, 0.01, 0),
+  range("contrast", "Contrast", 0, 3, 0.01, 1.05),
+  range("lighting", "Lighting", 0, 1, 0.01, 0.55),
   toggle("mouseInteraction", "Mouse interaction", true),
   range("mouseStrength", "Mouse strength", 0, 3, 0.05, 1)
 ] as const;
@@ -150,7 +158,6 @@ const NEURO_NOISE_PARAMETERS = [
   color("colorMid", "Mid color", "#47a6ff"),
   color("colorBack", "Back color", "#000000"),
   range("brightness", "Brightness", -1, 1, 0.01, 0.05),
-  range("contrast", "Contrast", -1, 1, 0.01, 0.3),
   range("scale", "Scale", 0.1, 4, 0.05, 1),
   range("rotation", "Rotation", -180, 180, 1, 0)
 ] as const;
@@ -158,9 +165,11 @@ const NEURO_NOISE_PARAMETERS = [
 const LIQUID_CHROME_SPEC = effectSpec("liquidChrome", "CHROME", { min: 0.02, max: 2, step: 0.01, defaultValue: 0.2 }, LIQUID_CHROME_PARAMETERS);
 const DOT_GRID_SPEC = effectSpec("dotGrid", "DOT", { min: 5, max: 22, step: 0.05, defaultValue: 10 }, DOT_GRID_PARAMETERS);
 const NEURO_NOISE_SPEC = effectSpec("neuroNoise", "NEURO", { min: 0, max: 4, step: 0.01, defaultValue: 1 }, NEURO_NOISE_PARAMETERS);
+const SMOKE_SPEC = effectSpec("smoke", "SMOKE", { min: 10, max: 20, step: 1, defaultValue: 12, integer: true, label: "speed" }, SMOKE_PARAMETERS);
 
 export const DYNAMIC_EFFECT_DEFINITIONS: readonly DynamicEffectDefinition[] = [
   FLOW_SPEC,
+  SMOKE_SPEC,
   CELLS_SPEC,
   LIQUID_CHROME_SPEC,
   DOT_GRID_SPEC,
