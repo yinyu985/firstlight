@@ -12,7 +12,6 @@ import {
 } from "./model";
 import {
   getDynamicEffectSpeed,
-  isDynamicEffectInput,
   isDynamicEffect,
   normalizeDynamicEffect,
   normalizeDynamicParameters,
@@ -136,15 +135,13 @@ export function validateSnapshot(input: unknown): Snapshot {
     throw new SnapshotValidationError("The remote snapshot is not a JSON object");
   }
   const rawValue = input as Record<string, unknown>;
-  if (rawValue.schemaVersion !== 1 && rawValue.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
+  if (rawValue.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
     throw new SnapshotValidationError("Unsupported snapshot version");
   }
-  if (rawValue.settingsVersion !== undefined && (
-    typeof rawValue.settingsVersion !== "number" || !Number.isInteger(rawValue.settingsVersion) || rawValue.settingsVersion < 0
-  )) throw new SnapshotValidationError("Invalid settings version");
-  if (typeof rawValue.settingsVersion === "number" && rawValue.settingsVersion > SETTINGS_VERSION) {
+  if (typeof rawValue.settingsVersion === "number" && Number.isInteger(rawValue.settingsVersion) && rawValue.settingsVersion > SETTINGS_VERSION) {
     throw new SnapshotValidationError("Settings were created by a newer Firstlight version");
   }
+  if (rawValue.settingsVersion !== SETTINGS_VERSION) throw new SnapshotValidationError("Unsupported settings version");
   const value: Record<string, unknown> = { ...rawValue, config: normalizeSettings(rawValue.config) };
   if (typeof value.updatedAt !== "string" || !value.updatedAt.endsWith("+08:00") || Number.isNaN(Date.parse(value.updatedAt))) {
     throw new SnapshotValidationError("Snapshot timestamp must use the +08:00 offset");
@@ -177,7 +174,7 @@ export function validateSnapshot(input: unknown): Snapshot {
     background.angle < 0 || background.angle > 360
   )) throw new SnapshotValidationError("Invalid gradient settings");
   if (background.type === "dynamic") {
-    if (background.effect !== undefined && !isDynamicEffectInput(background.effect)) {
+    if (background.effect !== undefined && !isDynamicEffect(background.effect)) {
       throw new SnapshotValidationError("Invalid dynamic background effect");
     }
     const effect = normalizeDynamicEffect(background.effect);
@@ -195,12 +192,12 @@ export function validateSnapshot(input: unknown): Snapshot {
     }
     const profiles: DynamicEffectProfiles = {};
     for (const [effectInput, rawProfile] of Object.entries(input as Record<string, unknown>)) {
-      if (!isDynamicEffectInput(effectInput)) throw new SnapshotValidationError("Invalid dynamic effect profile id");
+      if (!isDynamicEffect(effectInput)) throw new SnapshotValidationError("Invalid dynamic effect profile id");
       if (!rawProfile || typeof rawProfile !== "object" || Array.isArray(rawProfile)) {
         throw new SnapshotValidationError("Invalid dynamic effect profile");
       }
       const profile = rawProfile as Record<string, unknown>;
-      const effect = normalizeDynamicEffect(effectInput);
+      const effect = effectInput;
       if (effect !== "neuroNoise" && (
         typeof profile.from !== "string" || !HEX_COLOR.test(profile.from) ||
         typeof profile.to !== "string" || !HEX_COLOR.test(profile.to) ||
@@ -208,8 +205,6 @@ export function validateSnapshot(input: unknown): Snapshot {
       )) {
         throw new SnapshotValidationError("Invalid dynamic effect profile colors or angle");
       }
-      const isCanonical = isDynamicEffect(effectInput);
-      if (!isCanonical && profiles[effect] !== undefined) continue;
       const speedSpec = getDynamicEffectSpeed(effect);
       if (typeof profile.speed !== "number" || !Number.isFinite(profile.speed) ||
         (speedSpec.integer && !Number.isInteger(profile.speed)) || profile.speed < speedSpec.min || profile.speed > speedSpec.max) {
@@ -323,6 +318,8 @@ export function validateSnapshot(input: unknown): Snapshot {
       return { title: node.title, children: validateNodes(node.children as unknown[], depth + 1) };
     });
   };
+
+  if (value.notes === undefined) throw new SnapshotValidationError("Invalid notes list");
 
   const snapshot = {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,

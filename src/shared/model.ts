@@ -1,4 +1,4 @@
-import { isDynamicEffect, isDynamicEffectInput, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed, type DynamicEffect, type DynamicEffectParameters } from "./dynamicEffects";
+import { isDynamicEffect, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed, type DynamicEffect, type DynamicEffectParameters } from "./dynamicEffects";
 export type { DynamicEffect, DynamicEffectParameters } from "./dynamicEffects";
 export const SNAPSHOT_SCHEMA_VERSION = 2 as const;
 export const SETTINGS_VERSION = 1 as const;
@@ -253,9 +253,8 @@ export function normalizeSettings(input: unknown): SyncedSettings {
 
   const dynamicEffectProfiles: DynamicEffectProfiles = {};
   for (const [effectInput, rawProfile] of Object.entries(settingsRecord(settings.dynamicEffectProfiles))) {
-    if (!isDynamicEffectInput(effectInput)) continue;
-    const effect = normalizeDynamicEffect(effectInput);
-    if (!isDynamicEffect(effectInput) && dynamicEffectProfiles[effect] !== undefined) continue;
+    if (!isDynamicEffect(effectInput)) continue;
+    const effect = effectInput;
     const profile = settingsRecord(rawProfile);
     if (effect === "neuroNoise") {
       dynamicEffectProfiles.neuroNoise = {

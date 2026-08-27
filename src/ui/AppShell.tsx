@@ -9,7 +9,11 @@ import {
   type RangeParameterDefinition,
   getDynamicEffectDefinition,
   DYNAMIC_EFFECT_DEFINITIONS,
+  GALAXY_DEFAULT_COLORS,
+  LIGHT_PILLAR_DEFAULT_COLORS,
   NEURO_NOISE_DEFAULT_COLORS,
+  SNOW_DEFAULT_COLORS,
+  SILK_DEFAULT_COLORS,
   type SelectParameterDefinition,
   type ToggleParameterDefinition,
   normalizeDynamicParameters,
@@ -46,6 +50,10 @@ interface Props {
   onSaveNotes?: (notes: SyncNote[]) => void | Promise<void>;
 }
 
+type ColorControlDynamicBackground = Exclude<DynamicBackgroundSettings, { effect: "neuroNoise" }> & {
+  effect: Exclude<DynamicEffect, "neuroNoise" | "flash">;
+};
+
 const GRID_COLUMN_WIDTH = 210;
 const GRID_COLUMN_MIN_WIDTH = 170;
 const GRID_COLUMN_GAP = 1;
@@ -78,13 +86,17 @@ function fitGrid(columns: number, viewportWidth: number): GridFit {
 
 export function backgroundImageCss(background: Background): string {
   if (background.type === "solid") return "none";
-  if (background.type === "dynamic" && background.effect === "neuroNoise") return "none";
+  if (background.type === "dynamic" && (background.effect === "neuroNoise" || background.effect === "lightPillar" || background.effect === "snow" || background.effect === "silk" || background.effect === "flash")) return "none";
   return `linear-gradient(${background.angle}deg in oklab, ${background.from}, ${background.to})`;
 }
 
 export function backgroundColorCss(background: Background): string {
   if (background.type === "solid") return background.color;
   if (background.type === "dynamic" && background.effect === "neuroNoise") return "#070b12";
+  if (background.type === "dynamic" && background.effect === "lightPillar") return "#000000";
+  if (background.type === "dynamic" && background.effect === "snow") return SNOW_DEFAULT_COLORS.background;
+  if (background.type === "dynamic" && background.effect === "silk") return background.from;
+  if (background.type === "dynamic" && background.effect === "flash") return "#000000";
   return background.type === "dynamic"
     ? `color-mix(in oklab, ${background.from} 50%, ${background.to})`
     : background.from;
@@ -335,8 +347,8 @@ function DynamicEffectPicker({ value, onChange }: { value: DynamicEffect; onChan
   const menuId = useId();
   const effects = DYNAMIC_EFFECT_DEFINITIONS;
   return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label="Dynamic background effect" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu effect-menu" id={menuId} role="listbox" aria-label="Dynamic background effect">{effects.map((effect) => {
+    <button className="picker-trigger" aria-label="动态背景动效" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" aria-hidden="true" /></button>
+    {open && <div className="picker-menu effect-menu" id={menuId} role="listbox" aria-label="动态背景动效">{effects.map((effect) => {
       return <button
         key={effect.id}
         role="option"
@@ -355,6 +367,23 @@ function DynamicEffectPicker({ value, onChange }: { value: DynamicEffect; onChan
   </div>;
 }
 
+function dynamicColorHint(effect: DynamicEffect): string {
+  switch (effect) {
+    case "dotGrid":
+      return "左侧是圆点常态颜色，右侧是鼠标靠近时的发光颜色";
+    case "lightPillar":
+      return "左侧是光柱顶部颜色，右侧是光柱底部颜色";
+    case "galaxy":
+      return "透明背景开启时，这两种颜色显示在星河下方";
+    default:
+      return "控制动画混合使用的两种主色";
+  }
+}
+
+export function dynamicBackgroundHasColorControls(background: DynamicBackgroundSettings): background is ColorControlDynamicBackground {
+  return background.effect !== "neuroNoise" && background.effect !== "flash";
+}
+
 const DYNAMIC_EFFECT_PARAMETER_LABELS = {
   range: "range",
   color: "color",
@@ -367,7 +396,7 @@ function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spe
   const safeValue = spec.integer ? Math.round(numericValue) : numericValue;
 
   return <div className="setting-line size-line">
-    <label>{spec.label} <b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b></label>
+    <label><span className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</span><b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b></label>
     <input
       type="range"
       aria-label={spec.label}
@@ -381,15 +410,15 @@ function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spe
 }
 
 function DynamicEffectColorField({ value, spec, onChange }: { value: string; spec: ColorParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><input aria-label={spec.label} className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
+  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><input aria-label={spec.label} className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
 }
 
 function DynamicEffectToggleField({ value, spec, onChange }: { value: boolean; spec: ToggleParameterDefinition; onChange: (value: boolean) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><VisibilityToggle label={spec.label} visible={value} onChange={onChange} /></div>;
+  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><div className="segmented visibility-toggle" role="group" aria-label={spec.label}><button aria-pressed={value} className={value ? "selected" : ""} onClick={() => onChange(true)}>开</button><button aria-pressed={!value} className={!value ? "selected" : ""} onClick={() => onChange(false)}>关</button></div></div>;
 }
 
 function DynamicEffectSelectField({ value, spec, onChange }: { value: string; spec: SelectParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label>{spec.label}</label><div className="segmented" role="group" aria-label={spec.label}>{spec.options.map((option) => <button key={option.value} aria-pressed={option.value === value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
+  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><div className="segmented" role="group" aria-label={spec.label}>{spec.options.map((option) => <button key={option.value} aria-pressed={option.value === value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
 }
 
 function DynamicEffectParameterRows({ definitions, values, onChange }: {
@@ -418,6 +447,7 @@ function DynamicEffectParameterRows({ definitions, values, onChange }: {
 
   return <>
     {definitions.map((definition) => {
+      if (definition.hidden) return null;
       switch (definition.kind) {
         case DYNAMIC_EFFECT_PARAMETER_LABELS.range: {
           const spec = definition as RangeParameterDefinition;
@@ -568,12 +598,23 @@ function baselineDynamicBackground(
     };
   }
   const source = genericColorSettings(from);
+  const colors = effect === "lightPillar"
+    ? { from: LIGHT_PILLAR_DEFAULT_COLORS.top, to: LIGHT_PILLAR_DEFAULT_COLORS.bottom }
+    : effect === "galaxy"
+      ? GALAXY_DEFAULT_COLORS
+      : effect === "snow"
+        ? { from: SNOW_DEFAULT_COLORS.snow, to: SNOW_DEFAULT_COLORS.background }
+        : effect === "silk"
+          ? { from: SILK_DEFAULT_COLORS.silk, to: SILK_DEFAULT_COLORS.silk }
+          : effect === "flash"
+            ? { from: "#000000", to: "#000000" }
+            : source;
 
   return {
     type: "dynamic",
     effect,
-    from: source.from,
-    to: source.to,
+    from: colors.from,
+    to: colors.to,
     angle: normalizeDynamicAngle(source.angle),
     speed: definition.speed.defaultValue,
     parameters: normalizeDynamicParameters(effect, definition.defaultParameters)
@@ -967,18 +1008,19 @@ export function AppShell(props: Props) {
                 const dynamicBackground = activeBackground;
                 const effectDefinition = getDynamicEffectDefinition(dynamicBackground.effect);
                 const parameters = normalizeDynamicParameters(dynamicBackground.effect, dynamicBackground.parameters);
+                const speedLabel = effectDefinition.speed.label ?? "动画速度";
                 return <>
-                  <div className="setting-line"><label>Effect</label><DynamicEffectPicker
+                  <div className="setting-line"><label>动效</label><DynamicEffectPicker
                     value={dynamicBackground.effect}
                     onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
                   /></div>
-                  {dynamicBackground.effect !== "neuroNoise" && <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Dynamic background colors"><input aria-label="Dynamic background start color" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="Dynamic background end color" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>}
-                  {dynamicBackground.effect !== "neuroNoise" && effectDefinition.supportsAngle && <div className="setting-line angle-line"><label>Angle <b>{dynamicBackground.angle}°</b></label><input aria-label="Dynamic background angle" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
+                  {dynamicBackground.effect === "snow" || dynamicBackground.effect === "silk" ? <div className="setting-line"><label className="parameter-copy"><span>{dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"}</span><small>{dynamicBackground.effect === "snow" ? "控制所有雪花使用的颜色" : "控制整片丝绸流光使用的主色"}</small></label><input aria-label={dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"} className="color-input" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value, to: dynamicBackground.effect === "silk" ? event.target.value : dynamicBackground.to })} /></div> : dynamicBackgroundHasColorControls(dynamicBackground) && <div className="setting-line"><label className="parameter-copy"><span>动效颜色</span><small>{dynamicColorHint(dynamicBackground.effect)}</small></label><div className="color-pair" role="group" aria-label="动效颜色"><input aria-label="第一种动效颜色" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="第二种动效颜色" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>}
+                  {dynamicBackground.effect !== "neuroNoise" && effectDefinition.supportsAngle && <div className="setting-line angle-line size-line"><label><span className="parameter-copy"><span>流动方向</span><small>旋转整个颜色场的运动方向</small></span><b>{dynamicBackground.angle}°</b></label><input aria-label="动效流动方向" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
                   <div className="setting-line size-line speed-line">
-                    <label>Speed <b>{dynamicBackground.speed}</b></label>
+                    <label><span className="parameter-copy"><span>{speedLabel}</span>{effectDefinition.speed.hint && <small>{effectDefinition.speed.hint}</small>}</span><b>{dynamicBackground.speed}</b></label>
                     <input
                       type="range"
-                      aria-label="Dynamic background speed"
+                      aria-label={speedLabel}
                       min={effectDefinition.speed.min}
                       max={effectDefinition.speed.max}
                       step={effectDefinition.speed.step}

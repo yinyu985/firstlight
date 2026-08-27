@@ -4,7 +4,11 @@ import type { DynamicEffect } from "../shared/dynamicEffects";
 import { NeuroNoise } from "./backgrounds/NeuroNoise";
 
 const DotGrid = lazy(() => import("./backgrounds/DotGrid").then((module) => ({ default: module.DotGrid })));
-const LiquidChrome = lazy(() => import("./backgrounds/LiquidChrome").then((module) => ({ default: module.LiquidChrome })));
+const Galaxy = lazy(() => import("./backgrounds/Galaxy").then((module) => ({ default: module.Galaxy })));
+const LightPillar = lazy(() => import("./backgrounds/LightPillar").then((module) => ({ default: module.LightPillar })));
+const Snow = lazy(() => import("./backgrounds/Snow").then((module) => ({ default: module.Snow })));
+const SilkFlow = lazy(() => import("./backgrounds/SilkFlow").then((module) => ({ default: module.SilkFlow })));
+const Flash = lazy(() => import("./backgrounds/Flash").then((module) => ({ default: module.Flash })));
 
 type ColorDynamicBackgroundSettings = Exclude<DynamicBackgroundSettings, { effect: "neuroNoise" }>;
 
@@ -650,7 +654,11 @@ export function DynamicBackground({ background }: Props) {
     speed: background.speed,
     parameters
   };
-  if (background.effect === "liquidChrome") return <Suspense fallback={null}><LiquidChrome className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "flash") return <Suspense fallback={null}><Flash className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "silk") return <Suspense fallback={null}><SilkFlow className="dynamic-background" {...effectProps} /></Suspense>;
   if (background.effect === "dotGrid") return <Suspense fallback={null}><DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} /></Suspense>;
+  if (background.effect === "lightPillar") return <Suspense fallback={null}><LightPillar className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "galaxy") return <Suspense fallback={null}><Galaxy className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "snow") return <Suspense fallback={null}><Snow className="dynamic-background" {...effectProps} /></Suspense>;
   return <WebGlDynamicBackground background={background} />;
 }

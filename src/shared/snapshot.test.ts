@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, MAX_SNAPSHOT_BYTES, eastEightTimestamp, snapshotFrom, type SyncedSettings, type Snapshot } from "./model";
-import { DYNAMIC_EFFECT_DEFINITIONS, isDynamicEffect, isDynamicEffectInput, normalizeDynamicEffect, type DynamicEffectParameterDefinition, type DynamicSpeedSpec, type DynamicEffectDefinition } from "./dynamicEffects";
+import { DYNAMIC_EFFECT_DEFINITIONS, isDynamicEffect, normalizeDynamicEffect, type DynamicEffectParameterDefinition, type DynamicSpeedSpec, type DynamicEffectDefinition } from "./dynamicEffects";
 import { parseSnapshot, prettySnapshot, serializeSnapshot, snapshotBytes, snapshotHash, stableStringify, validateSnapshot } from "./snapshot";
 
 type RangeParameter = Extract<DynamicEffectParameterDefinition, { kind: "range" }>;
@@ -98,8 +98,8 @@ describe("canonical snapshot order", () => {
 });
 
 describe("parseSnapshot", () => {
-  it("removes legacy generic colors and angle from Neuro backgrounds and profiles", () => {
-    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS))) as {
+  it("removes unsupported generic colors and angle from Neuro backgrounds and profiles", () => {
+    const input = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS))) as {
       config: {
         background: Record<string, unknown>;
         dynamicEffectProfiles: Record<string, unknown>;
@@ -113,7 +113,7 @@ describe("parseSnapshot", () => {
       scale: 1,
       rotation: 0
     };
-    legacy.config.background = {
+    input.config.background = {
       type: "dynamic",
       effect: "neuroNoise",
       from: "#ff0000",
@@ -122,7 +122,7 @@ describe("parseSnapshot", () => {
       speed: 1,
       parameters
     };
-    legacy.config.dynamicEffectProfiles.neuroNoise = {
+    input.config.dynamicEffectProfiles.neuroNoise = {
       from: "#ff0000",
       to: "#00ff00",
       angle: 211,
@@ -130,7 +130,7 @@ describe("parseSnapshot", () => {
       parameters
     };
 
-    const parsed = parseSnapshot(JSON.stringify(legacy));
+    const parsed = parseSnapshot(JSON.stringify(input));
 
     expect(Object.keys(parsed.config.background)).toEqual(["type", "effect", "speed", "parameters"]);
     expect(Object.keys(parsed.config.dynamicEffectProfiles?.neuroNoise ?? {})).toEqual(["speed", "parameters"]);
@@ -165,12 +165,12 @@ describe("parseSnapshot", () => {
       }
     };
     const saved = snapshotFrom([], settings);
-    const legacySnapshot = JSON.parse(JSON.stringify(saved)) as {
+    const input = JSON.parse(JSON.stringify(saved)) as {
       config: { dynamicEffectProfiles: Record<string, unknown> };
     };
-    legacySnapshot.config.dynamicEffectProfiles = {
-      ...legacySnapshot.config.dynamicEffectProfiles,
-      mesh: {
+    input.config.dynamicEffectProfiles = {
+      ...input.config.dynamicEffectProfiles,
+      unknownEffect: {
         from: "#778899",
         to: "#99aabb",
         angle: 180,
@@ -185,7 +185,7 @@ describe("parseSnapshot", () => {
         parameters: {}
       }
     };
-    const parsed = parseSnapshot(JSON.stringify(legacySnapshot));
+    const parsed = parseSnapshot(JSON.stringify(input));
     const flowProfile = parsed.config.dynamicEffectProfiles?.flow;
 
     expect(flowProfile).toBeDefined();
@@ -211,25 +211,26 @@ describe("parseSnapshot", () => {
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise).not.toHaveProperty("to");
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise).not.toHaveProperty("angle");
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise?.parameters).not.toHaveProperty("contrast");
-    expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("snow");
+    expect(parsed.config.dynamicEffectProfiles?.snow).toMatchObject({
+      from: "#445566",
+      to: "#556677",
+      angle: 44,
+      speed: 5,
+      parameters: { flakeSize: 0.019, variant: "snowflake", direction: 90 }
+    });
     if (!flowProfile) throw new Error("Flow profile missing");
     expect(flowProfile.parameters).toEqual({});
-    expect(parsed.config.dynamicEffectProfiles?.cells).toMatchObject({
-      from: "#778899",
-      to: "#99aabb",
-      angle: 180,
-      speed: 17,
-      parameters: { wallThickness: 1 }
-    });
+    expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("unknownEffect");
+    expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("cells");
   });
 
-  it("migrates legacy ferrofluid background profile to flow", () => {
+  it("drops unknown dynamic effect profile IDs", () => {
     const normalizedSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], {
       ...DEFAULT_SETTINGS,
-      background: { type: "dynamic", effect: "liquidChrome", from: "#102030", to: "#304050", angle: 145, speed: 999, parameters: {} }
+      background: { type: "dynamic", effect: "cells", from: "#102030", to: "#304050", angle: 145, speed: 17, parameters: { wallThickness: 1 } }
     }))) as unknown as { config: { dynamicEffectProfiles: unknown } };
     normalizedSnapshot.config.dynamicEffectProfiles = {
-      ferrofluid: {
+      unknownEffect: {
         from: "#102030",
         to: "#304050",
         angle: 10,
@@ -240,26 +241,22 @@ describe("parseSnapshot", () => {
     const normalized = parseSnapshot(JSON.stringify(normalizedSnapshot));
     const currentBackground = normalized.config.background;
     if (currentBackground.type !== "dynamic") throw new Error("Expected dynamic background");
-    const flowProfile = normalized.config.dynamicEffectProfiles?.flow;
-    if (!flowProfile) throw new Error("Expected migrated flow profile");
-
-    expect(currentBackground.speed).toBe(2);
-    expect(flowProfile.speed).toBe(14);
-    expect(flowProfile.parameters).toEqual({});
-    expect(normalized.config.dynamicEffectProfiles).not.toHaveProperty("ferrofluid");
+    expect(currentBackground).toMatchObject({ effect: "cells", speed: 17 });
+    expect(normalized.config.dynamicEffectProfiles).not.toHaveProperty("unknownEffect");
+    expect(normalized.config.dynamicEffectProfiles).not.toHaveProperty("flow");
   });
 
   it("normalizes renderer-used parameters that were previously under-modeled", () => {
     const settingsByEffect: Record<string, SyncedSettings> = {
-      liquidChrome: {
+      flash: {
         ...DEFAULT_SETTINGS,
         background: {
           type: "dynamic",
-          effect: "liquidChrome",
-          from: "#102030",
-          to: "#304050",
+          effect: "flash",
+          from: "#000000",
+          to: "#000000",
           angle: 145,
-          speed: 1,
+          speed: 25,
           parameters: {}
         }
       },
@@ -274,32 +271,70 @@ describe("parseSnapshot", () => {
           speed: 1,
           parameters: {}
         }
+      },
+      lightPillar: {
+        ...DEFAULT_SETTINGS,
+        background: {
+          type: "dynamic",
+          effect: "lightPillar",
+          from: "#5227ff",
+          to: "#ff9ffc",
+          angle: 145,
+          speed: 0.3,
+          parameters: { rotation: -35, pillarWidth: 8.5, pillarHeight: 0.65 }
+        }
       }
     };
 
-    const liquidChromeSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.liquidChrome))) as { config: { background: { parameters: Record<string, unknown> } } };
-    liquidChromeSnapshot.config.background.parameters.color3 = "#fefefe";
-    liquidChromeSnapshot.config.background.parameters.interactive = false;
-    liquidChromeSnapshot.config.background.parameters.brightness = 1.4;
-    liquidChromeSnapshot.config.background.parameters.contrast = 2;
-    liquidChromeSnapshot.config.background.parameters.lighting = 0.2;
-    const parsedLiquid = parseSnapshot(JSON.stringify(liquidChromeSnapshot));
+    const flashSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.flash))) as { config: { background: { parameters: Record<string, unknown> } } };
+    flashSnapshot.config.background.parameters.simResolution = 192;
+    flashSnapshot.config.background.parameters.dyeResolution = 1024;
+    flashSnapshot.config.background.parameters.densityDissipation = 6;
+    flashSnapshot.config.background.parameters.velocityDissipation = 4;
+    flashSnapshot.config.background.parameters.pressure = 0.7;
+    flashSnapshot.config.background.parameters.curl = 20;
+    flashSnapshot.config.background.parameters.splatRadius = 0.8;
+    flashSnapshot.config.background.parameters.splatForce = 9000;
+    flashSnapshot.config.background.parameters.autoMotion = true;
+    const parsedFlash = parseSnapshot(JSON.stringify(flashSnapshot));
 
     const dotGridSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.dotGrid))) as { config: { background: { parameters: Record<string, unknown> } } };
     const parsedDotGrid = parseSnapshot(JSON.stringify(dotGridSnapshot));
+    const lightPillarSnapshot = snapshotFrom([], settingsByEffect.lightPillar);
+    const parsedLightPillar = parseSnapshot(JSON.stringify(lightPillarSnapshot));
 
-    expect(parsedLiquid.config.background).toMatchObject({
+    expect(parsedFlash.config.background).toMatchObject({
       type: "dynamic",
-      parameters: { mouseInteraction: false, color3: "#fefefe", brightness: 1.4, contrast: 2, lighting: 0.2 }
+      effect: "flash",
+      speed: 25,
+      parameters: {
+        simResolution: 192,
+        dyeResolution: 1024,
+        densityDissipation: 6,
+        velocityDissipation: 4,
+        pressure: 0.7,
+        curl: 20,
+        splatRadius: 0.8,
+        splatForce: 9000,
+        autoMotion: true
+      }
     });
     expect(parsedDotGrid.config.background).toMatchObject({
       type: "dynamic",
       parameters: { dotSize: 16, gap: 32, proximity: 150, speedTrigger: 100, maxSpeed: 5000 }
     });
+    expect(parsedLightPillar.config.background).toMatchObject({
+      type: "dynamic",
+      effect: "lightPillar",
+      from: "#5227ff",
+      to: "#ff9ffc",
+      speed: 0.3,
+      parameters: { rotation: -35, pillarWidth: 8.5, pillarHeight: 0.65 }
+    });
   });
 
-  it("keeps canonical dynamic effect profile IDs when alias IDs are also present", () => {
-    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], {
+  it("keeps current dynamic effect profiles while dropping unknown profile IDs", () => {
+    const input = JSON.parse(JSON.stringify(snapshotFrom([], {
       ...DEFAULT_SETTINGS,
       background: {
         type: "dynamic",
@@ -310,7 +345,7 @@ describe("parseSnapshot", () => {
         speed: 10
       }
     }))) as { config: { dynamicEffectProfiles: Record<string, unknown> } };
-    legacy.config.dynamicEffectProfiles = {
+    input.config.dynamicEffectProfiles = {
       flow: {
         from: "#111111",
         to: "#222222",
@@ -318,7 +353,7 @@ describe("parseSnapshot", () => {
         speed: 14,
         parameters: {}
       },
-      ferrofluid: {
+      unknownEffect: {
         from: "#999999",
         to: "#888888",
         angle: 180,
@@ -327,13 +362,14 @@ describe("parseSnapshot", () => {
       }
     };
 
-    const parsed = parseSnapshot(JSON.stringify(legacy));
+    const parsed = parseSnapshot(JSON.stringify(input));
     expect(parsed.config.dynamicEffectProfiles?.flow).toMatchObject({
       from: "#111111",
       to: "#222222",
       angle: 10,
       speed: 14
     });
+    expect(parsed.config.dynamicEffectProfiles).not.toHaveProperty("unknownEffect");
   });
 
   it("accepts the current dynamic background structure", () => {
@@ -344,37 +380,25 @@ describe("parseSnapshot", () => {
     expect(parseSnapshot(JSON.stringify(snapshot)).config.background).toEqual(snapshot.config.background);
   });
 
-  it("defaults legacy dynamic backgrounds to flow", () => {
+  it("defaults a missing dynamic effect to flow", () => {
     const snapshot = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
       background: { type: "dynamic", effect: "flow", from: "#102030", to: "#70d0c0", angle: 210, speed: 10 }
     });
-    const legacy = JSON.parse(JSON.stringify(snapshot));
-    delete legacy.config.background.effect;
-    expect(parseSnapshot(JSON.stringify(legacy)).config.background).toEqual(snapshot.config.background);
+    const input = JSON.parse(JSON.stringify(snapshot));
+    delete input.config.background.effect;
+    expect(parseSnapshot(JSON.stringify(input)).config.background).toEqual(snapshot.config.background);
   });
 
-  it("migrates removed dynamic effects", () => {
+  it("treats every unknown dynamic effect ID as an invalid value", () => {
     const snapshot = snapshotFrom([], {
       ...DEFAULT_SETTINGS,
       background: { type: "dynamic", effect: "flow", from: "#102030", to: "#70d0c0", angle: 210, speed: 10 }
     });
-    const legacyFerrofluid = JSON.parse(JSON.stringify(snapshot));
-    legacyFerrofluid.config.background.effect = "ferrofluid";
-    expect(parseSnapshot(JSON.stringify(legacyFerrofluid)).config.background).toMatchObject({ effect: "flow" });
-
-    const legacyMesh = JSON.parse(JSON.stringify(snapshot));
-    legacyMesh.config.background.effect = "mesh";
-    expect(parseSnapshot(JSON.stringify(legacyMesh)).config.background).toMatchObject({ effect: "cells" });
-
-    const legacyGrid = JSON.parse(JSON.stringify(snapshot));
-    legacyGrid.config.background.effect = "grid";
-    expect(parseSnapshot(JSON.stringify(legacyGrid)).config.background).toMatchObject({ effect: "flow" });
-
-    for (const effect of ["particles", "dither", "rings", "aurora", "snow", "topography", "webThreads", "moltenMetal", "iridescence", "balatro"]) {
-      const removed = JSON.parse(JSON.stringify(snapshot));
-      removed.config.background.effect = effect;
-      expect(parseSnapshot(JSON.stringify(removed)).config.background).toMatchObject({ effect: "flow" });
+    for (const effect of ["unknownEffect", "futureEffect"]) {
+      const input = JSON.parse(JSON.stringify(snapshot));
+      input.config.background.effect = effect;
+      expect(parseSnapshot(JSON.stringify(input)).config.background).toMatchObject({ effect: "flow", speed: 10, parameters: {} });
     }
   });
 
@@ -388,18 +412,18 @@ describe("parseSnapshot", () => {
     expect(parsed).not.toHaveProperty("background");
   });
 
-  it("defaults hover style to underline for snapshots saved before the setting existed", () => {
+  it("restores the default when hover style is missing", () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
-    const legacy = JSON.parse(JSON.stringify(snapshot));
-    delete legacy.config.features.hoverStyle;
-    expect(parseSnapshot(JSON.stringify(legacy)).config.features.hoverStyle).toBe("underline");
+    const input = JSON.parse(JSON.stringify(snapshot));
+    delete input.config.features.hoverStyle;
+    expect(parseSnapshot(JSON.stringify(input)).config.features.hoverStyle).toBe("underline");
   });
 
   it("restores the default theme color when the field is missing", () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
-    const legacy = JSON.parse(JSON.stringify(snapshot));
-    delete legacy.config.features.themeColor;
-    expect(parseSnapshot(JSON.stringify(legacy)).config.features.themeColor).toBe(DEFAULT_SETTINGS.features.themeColor);
+    const input = JSON.parse(JSON.stringify(snapshot));
+    delete input.config.features.themeColor;
+    expect(parseSnapshot(JSON.stringify(input)).config.features.themeColor).toBe(DEFAULT_SETTINGS.features.themeColor);
   });
 
   it("drops unsupported feature fields instead of blocking the snapshot", () => {
@@ -408,15 +432,15 @@ describe("parseSnapshot", () => {
     expect(parseSnapshot(JSON.stringify(snapshot)).config.features).not.toHaveProperty("futureToggle");
   });
 
-  it("replaces invalid searchText values instead of migrating old meanings", () => {
+  it("replaces invalid searchText values with the current default", () => {
     const snapshot = parseSnapshot(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
-    const hiddenLegacy = JSON.parse(JSON.stringify(snapshot));
-    hiddenLegacy.config.features.searchText = false;
-    expect(parseSnapshot(JSON.stringify(hiddenLegacy)).config.features.searchText).toBe(DEFAULT_SETTINGS.features.searchText);
+    const falseInput = JSON.parse(JSON.stringify(snapshot));
+    falseInput.config.features.searchText = false;
+    expect(parseSnapshot(JSON.stringify(falseInput)).config.features.searchText).toBe(DEFAULT_SETTINGS.features.searchText);
 
-    const leftLegacy = JSON.parse(JSON.stringify(snapshot));
-    leftLegacy.config.features.searchText = true;
-    expect(parseSnapshot(JSON.stringify(leftLegacy)).config.features.searchText).toBe("left");
+    const trueInput = JSON.parse(JSON.stringify(snapshot));
+    trueInput.config.features.searchText = true;
+    expect(parseSnapshot(JSON.stringify(trueInput)).config.features.searchText).toBe(DEFAULT_SETTINGS.features.searchText);
   });
 
   it("replaces unknown hover styles with the current default", () => {
@@ -450,15 +474,14 @@ describe("parseSnapshot", () => {
     expect(() => parseSnapshot(JSON.stringify(future))).toThrow("newer Firstlight version");
   });
 
-  it("upgrades schema 1 snapshots into the current canonical shape", () => {
-    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
-    legacy.schemaVersion = 1;
-    delete legacy.settingsVersion;
-    legacy.config.features.unknownSetting = true;
-    const parsed = parseSnapshot(JSON.stringify(legacy));
-    expect(parsed.schemaVersion).toBe(2);
-    expect(parsed.settingsVersion).toBe(1);
-    expect(parsed.config.features).not.toHaveProperty("unknownSetting");
+  it("rejects snapshots whose schema or settings version is not current", () => {
+    const oldSchema = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    oldSchema.schemaVersion -= 1;
+    expect(() => parseSnapshot(JSON.stringify(oldSchema))).toThrow("Unsupported snapshot version");
+
+    const oldSettings = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    oldSettings.settingsVersion -= 1;
+    expect(() => parseSnapshot(JSON.stringify(oldSettings))).toThrow("Unsupported settings version");
   });
 
   it("requires the East Eight timestamp offset", () => {
@@ -501,13 +524,13 @@ describe("parseSnapshot", () => {
     expect(() => validateSnapshot({ ...snapshotFrom([], DEFAULT_SETTINGS), notes: [note] })).toThrow("unsupported fields");
   });
 
-  it("keeps missing notes as a legacy default but rejects a present malformed value", () => {
-    const legacy = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
-    delete legacy.notes;
-    expect(parseSnapshot(JSON.stringify(legacy)).notes).toEqual([]);
+  it("rejects missing or malformed notes", () => {
+    const input = JSON.parse(JSON.stringify(snapshotFrom([], DEFAULT_SETTINGS)));
+    delete input.notes;
+    expect(() => parseSnapshot(JSON.stringify(input))).toThrow("Invalid notes list");
 
-    for (const notes of [{}, "invalid", 1, null]) {
-      expect(() => parseSnapshot(JSON.stringify({ ...legacy, notes }))).toThrow("Invalid notes list");
+    for (const notes of [{}, "invalid", 1, null, undefined]) {
+      expect(() => validateSnapshot({ ...input, notes })).toThrow("Invalid notes list");
     }
   });
 
@@ -571,7 +594,6 @@ describe("dynamic effect range schema", () => {
   it("does not accept object prototype property names as dynamic effects", () => {
     for (const value of ["constructor", "__proto__", "toString"]) {
       expect(isDynamicEffect(value)).toBe(false);
-      expect(isDynamicEffectInput(value)).toBe(false);
       expect(normalizeDynamicEffect(value)).toBe("flow");
     }
 
@@ -608,30 +630,49 @@ describe("dynamic effect range schema", () => {
     }
   });
 
-  it("keeps exactly the six selected dynamic effects", () => {
+  it("keeps exactly the ten selected dynamic effects with Flow and Silk together", () => {
     expect(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => definition.id)).toEqual([
       "flow",
+      "silk",
       "smoke",
       "cells",
-      "liquidChrome",
+      "flash",
       "dotGrid",
+      "lightPillar",
+      "galaxy",
+      "snow",
       "neuroNoise"
     ]);
   });
 
-  it("uses practical product-tuned ranges for Smoke, Cells, Liquid Chrome, and DotGrid", () => {
+  it("uses practical product-tuned ranges for Smoke, Cells, Flash, and DotGrid", () => {
     const byId = Object.fromEntries(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => [definition.id, definition]));
 
     const cells = byId.cells;
     if (!cells) throw new Error("Missing cells effect definition");
+    const silk = byId.silk;
+    if (!silk) throw new Error("Missing silk effect definition");
     const smoke = byId.smoke;
     if (!smoke) throw new Error("Missing smoke effect definition");
     const dotGrid = byId.dotGrid;
     if (!dotGrid) throw new Error("Missing dotGrid effect definition");
-    const liquidChrome = byId.liquidChrome;
-    if (!liquidChrome) throw new Error("Missing liquidChrome effect definition");
+    const flash = byId.flash;
+    if (!flash) throw new Error("Missing flash effect definition");
+    const lightPillar = byId.lightPillar;
+    if (!lightPillar) throw new Error("Missing lightPillar effect definition");
+    const galaxy = byId.galaxy;
+    if (!galaxy) throw new Error("Missing galaxy effect definition");
+    const snow = byId.snow;
+    if (!snow) throw new Error("Missing snow effect definition");
 
     expect(smoke.speed).toMatchObject({ min: 10, max: 20, defaultValue: 12 });
+    expect(byId.flow?.label).toBe("FLOW I");
+    expect(silk.label).toBe("FLOW II");
+    expect(silk.speed).toMatchObject({ min: 0, max: 20, step: 0.1, defaultValue: 9, label: "流动速度" });
+    expect(silk.defaultParameters).toEqual({ scale: 2, noiseIntensity: 3, rotation: 0 });
+    expect(findNumericRange(silk, "scale")).toMatchObject({ min: 0.1, max: 5, step: 0.1, defaultValue: 2 });
+    expect(findNumericRange(silk, "noiseIntensity")).toMatchObject({ min: 0, max: 5, step: 0.1, defaultValue: 3 });
+    expect(findNumericRange(silk, "rotation")).toMatchObject({ min: 0, max: 6.28, step: 0.1, defaultValue: 0 });
     expect(findNumericRange(smoke, "smokeCount")).toMatchObject({ min: 1, max: 6, step: 1, defaultValue: 4, integer: true });
     expect(findNumericRange(smoke, "density")).toMatchObject({ min: 0.35, max: 1.5, defaultValue: 0.9 });
     expect(findNumericRange(smoke, "turbulence")).toMatchObject({ min: 0, max: 2, defaultValue: 1 });
@@ -639,12 +680,47 @@ describe("dynamic effect range schema", () => {
 
     expect(findNumericRange(cells, "wallThickness")).toMatchObject({ min: 0.3, max: 2.5, step: 0.05, defaultValue: 1 });
 
-    expect(findNumericRange(liquidChrome, "amplitude")).toMatchObject({ min: 0.02, max: 0.3, defaultValue: 0.2 });
-    expect(findNumericRange(liquidChrome, "frequencyX")).toMatchObject({ min: 0.5, max: 12, defaultValue: 3 });
-    expect(findNumericRange(liquidChrome, "frequencyY")).toMatchObject({ min: 0.5, max: 12, defaultValue: 2 });
-    expect(findNumericRange(liquidChrome, "contrast")).toMatchObject({ min: 0, max: 3, defaultValue: 1.05 });
-    expect(findNumericRange(liquidChrome, "lighting")).toMatchObject({ min: 0, max: 1, defaultValue: 0.55 });
+    expect(flash.label).toBe("FLASH");
+    expect(flash.speed).toMatchObject({ min: 1, max: 50, step: 1, defaultValue: 25, integer: true, label: "换色速度" });
+    expect(flash.parameters.map((parameter) => parameter.key)).toEqual([
+      "simResolution",
+      "dyeResolution",
+      "densityDissipation",
+      "velocityDissipation",
+      "pressure",
+      "curl",
+      "splatRadius",
+      "splatForce",
+      "autoMotion"
+    ]);
+    expect(flash.defaultParameters).toEqual({
+      simResolution: 128,
+      dyeResolution: 1440,
+      densityDissipation: 3.5,
+      velocityDissipation: 2.5,
+      pressure: 0.1,
+      curl: 16,
+      splatRadius: 0.65,
+      splatForce: 6000,
+      autoMotion: false
+    });
+    expect(findNumericRange(flash, "simResolution")).toMatchObject({ min: 32, max: 256, step: 32, defaultValue: 128, integer: true });
+    expect(findNumericRange(flash, "dyeResolution")).toMatchObject({ min: 512, max: 2048, step: 128, defaultValue: 1440, integer: true });
+    expect(findNumericRange(flash, "densityDissipation")).toMatchObject({ min: 0.5, max: 10, step: 0.5, defaultValue: 3.5 });
+    expect(findNumericRange(flash, "velocityDissipation")).toMatchObject({ min: 0.5, max: 5, step: 0.5, defaultValue: 2.5 });
+    expect(findNumericRange(flash, "pressure")).toMatchObject({ min: 0, max: 1, step: 0.1, defaultValue: 0.1 });
+    expect(findNumericRange(flash, "curl")).toMatchObject({ min: 0, max: 30, step: 1, defaultValue: 16, integer: true });
+    expect(findNumericRange(flash, "splatRadius")).toMatchObject({ min: 0.05, max: 1, step: 0.05, defaultValue: 0.65 });
+    expect(findNumericRange(flash, "splatForce")).toMatchObject({ min: 1000, max: 20000, step: 500, defaultValue: 6000, integer: true });
+    expect(flash.parameters.find((parameter) => parameter.key === "autoMotion")).toMatchObject({ kind: "toggle", label: "自动游走", defaultValue: false });
+    expect(flash.parameters.every((parameter) => !parameter.hidden && typeof parameter.hint === "string" && parameter.hint.length > 0)).toBe(true);
     expect(dotGrid.speed).toMatchObject({ min: 5, max: 22, defaultValue: 10 });
+    expect(dotGrid.speed.label).toBe("位移强度");
+    expect(dotGrid.parameters.filter((parameter) => !parameter.hidden).map((parameter) => [parameter.key, parameter.label])).toEqual([
+      ["dotSize", "圆点大小"],
+      ["gap", "圆点间距"],
+      ["proximity", "鼠标光圈大小"]
+    ]);
     expect(findNumericRange(dotGrid, "dotSize").max).toBeLessThanOrEqual(120);
     expect(findNumericRange(dotGrid, "dotSize").min).toBeGreaterThanOrEqual(2);
     expect(findNumericRange(dotGrid, "gap").max).toBeLessThanOrEqual(160);
@@ -658,5 +734,72 @@ describe("dynamic effect range schema", () => {
     expect(findNumericRange(dotGrid, "shockStrength").min).toBeGreaterThanOrEqual(0.2);
     expect(findNumericRange(dotGrid, "maxSpeed")).toMatchObject({ min: 300, max: 20000, step: 10 });
     expect(findNumericRange(dotGrid, "resistance")).toMatchObject({ min: 150, max: 4000, step: 10, defaultValue: 750 });
+    expect(lightPillar.speed).toMatchObject({ min: 0.05, max: 2, step: 0.05, defaultValue: 0.3, label: "流动速度" });
+    expect(lightPillar.parameters.map((parameter) => [parameter.key, parameter.label])).toEqual([
+      ["rotation", "光柱旋转角度"],
+      ["pillarWidth", "光柱宽度"],
+      ["pillarHeight", "光柱高度"]
+    ]);
+    expect(findNumericRange(lightPillar, "rotation")).toMatchObject({ min: -180, max: 180, step: 1, defaultValue: 0, integer: true });
+    expect(findNumericRange(lightPillar, "pillarWidth")).toMatchObject({ min: 0.5, max: 12, step: 0.1, defaultValue: 8 });
+    expect(findNumericRange(lightPillar, "pillarHeight")).toMatchObject({ min: 0.1, max: 2, step: 0.05, defaultValue: 0.4 });
+    expect(galaxy.speed).toMatchObject({ min: 0.1, max: 3, step: 0.05, defaultValue: 1, label: "整体动画速度" });
+    expect(galaxy.parameters.map((parameter) => parameter.key)).toEqual([
+      "focalX",
+      "focalY",
+      "rotationX",
+      "rotationY",
+      "starSpeed",
+      "density",
+      "hueShift",
+      "disableAnimation",
+      "mouseInteraction",
+      "glowIntensity",
+      "saturation",
+      "mouseRepulsion",
+      "twinkleIntensity",
+      "rotationSpeed",
+      "repulsionStrength",
+      "autoCenterRepulsion",
+      "transparent"
+    ]);
+    expect(findNumericRange(galaxy, "starSpeed")).toMatchObject({ min: 0, max: 2, defaultValue: 0.5 });
+    expect(findNumericRange(galaxy, "density")).toMatchObject({ min: 0.1, max: 3, defaultValue: 1 });
+    expect(findNumericRange(galaxy, "hueShift")).toMatchObject({ min: 0, max: 360, step: 1, defaultValue: 140, integer: true });
+    expect(findNumericRange(galaxy, "repulsionStrength")).toMatchObject({ min: 0, max: 5, defaultValue: 2 });
+    expect(galaxy.parameters.every((parameter) => typeof parameter.hint === "string" && parameter.hint.length > 0)).toBe(true);
+    expect(snow.label).toBe("SNOW");
+    expect(snow.speed).toMatchObject({ min: 0.1, max: 5, step: 0.25, defaultValue: 1.35, label: "飘落速度" });
+    expect(snow.defaultParameters).toEqual({
+      flakeSize: 0.019,
+      minFlakeSize: 2.75,
+      pixelResolution: 500,
+      depthFade: 10,
+      farPlane: 15,
+      brightness: 3,
+      gamma: 1,
+      density: 0.5,
+      variant: "snowflake",
+      direction: 90
+    });
+    expect(findNumericRange(snow, "flakeSize")).toMatchObject({ min: 0.001, max: 0.05, step: 0.002, defaultValue: 0.019 });
+    expect(findNumericRange(snow, "minFlakeSize")).toMatchObject({ min: 0.5, max: 3, step: 0.25, defaultValue: 2.75 });
+    expect(findNumericRange(snow, "pixelResolution")).toMatchObject({ min: 50, max: 500, step: 25, defaultValue: 500, integer: true });
+    expect(findNumericRange(snow, "direction")).toMatchObject({ min: 0, max: 360, step: 5, defaultValue: 90, integer: true });
+  });
+
+  it("uses plain Chinese labels and explanations for every visible dynamic control", () => {
+    const containsChinese = (value: unknown) => typeof value === "string" && /[\u3400-\u9fff]/u.test(value);
+
+    for (const definition of DYNAMIC_EFFECT_DEFINITIONS) {
+      expect(containsChinese(definition.speed.label), `${definition.id} speed label`).toBe(true);
+      expect(containsChinese(definition.speed.hint), `${definition.id} speed hint`).toBe(true);
+      for (const parameter of definition.parameters) {
+        expect(containsChinese(parameter.label), `${definition.id}.${parameter.key} label`).toBe(true);
+        if (!parameter.hidden) {
+          expect(containsChinese(parameter.hint), `${definition.id}.${parameter.key} hint`).toBe(true);
+        }
+      }
+    }
   });
 });
