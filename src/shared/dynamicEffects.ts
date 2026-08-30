@@ -167,7 +167,7 @@ const FLASH_PARAMETERS = [
   withHint(range("curl", "旋涡强度", 0, 30, 1, 16, true), "控制轨迹卷成旋涡和翻滚的明显程度"),
   withHint(range("splatRadius", "笔触范围", 0.05, 1, 0.05, 0.65), "控制鼠标每次划过时带起的彩色流体有多宽"),
   withHint(range("splatForce", "推动力度", 1000, 20000, 500, 6000, true), "控制鼠标移动对流体施加的冲击有多强"),
-  withHint(toggle("autoMotion", "自动游走", false), "鼠标闲置时自动模拟一条平滑轨迹，让流体持续出现在画面中")
+  withHint(toggle("autoMotion", "自动游走", false), "鼠标闲置时自动模拟一条横向扫过画面的平滑曲线轨迹，让流体持续出现在画面中")
 ] as const;
 
 const DOT_GRID_PARAMETERS = [
@@ -221,7 +221,7 @@ export const GALAXY_DEFAULT_COLORS = {
 const SNOW_PARAMETERS = [
   withHint(range("flakeSize", "近处雪花大小", 0.001, 0.05, 0.002, 0.019), "控制靠近镜头时雪花本体的尺寸"),
   withHint(range("minFlakeSize", "最小显示尺寸", 0.5, 3, 0.25, 2.75), "保证远处雪花在屏幕上不会小于这个像素尺寸"),
-  withHint(range("pixelResolution", "像素画精细度", 50, 500, 25, 500, true), "数值越大像素块越细，数值越小复古颗粒越明显"),
+  withHint(range("pixelResolution", "像素画精细度", 50, 2000, 25, 500, true), "数值越大像素块越细，数值越小复古颗粒越明显"),
   withHint(range("depthFade", "远处可见度", 1, 20, 1, 10, true), "数值越大，远处雪花保持明亮的距离越长"),
   withHint(range("farPlane", "最远绘制距离", 5, 50, 5, 15, true), "控制视野深处最多绘制多远的雪花"),
   withHint(range("brightness", "雪花亮度", 0.2, 3, 0.1, 3), "控制所有雪花的整体亮度"),

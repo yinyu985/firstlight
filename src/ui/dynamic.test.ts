@@ -106,12 +106,19 @@ describe("Dynamic background", () => {
     });
   });
 
-  it("keeps Flash automatic pointer movement smooth, bounded, and non-repeating", () => {
+  it("keeps Flash automatic pointer movement smooth, bounded, and wide-ranging", () => {
     expect(FLASH_AUTO_IDLE_MS).toBe(900);
     let state: FlashAutoPointerState = { x: 0.5, y: 0.5, velocityX: 0, velocityY: 0, phase: 0 };
     let distance = 0;
     let directionChanges = 0;
+    let minX = state.x;
+    let maxX = state.x;
+    let minY = state.y;
+    let maxY = state.y;
     let previousVelocityX = state.velocityX;
+    const first = flashAutoPointerStep(state, 1 / 60);
+    expect(first.x).toBeGreaterThanOrEqual(0.5);
+    expect(first.y).toBeCloseTo(0.5, 3);
     for (let frame = 0; frame < 1800; frame += 1) {
       const next = flashAutoPointerStep(state, 1 / 60);
       const stepDistance = Math.hypot(next.x - state.x, next.y - state.y);
@@ -123,11 +130,17 @@ describe("Dynamic background", () => {
       expect(next.y).toBeGreaterThanOrEqual(0.08);
       expect(next.y).toBeLessThanOrEqual(0.92);
       expect(Object.values(next).every(Number.isFinite)).toBe(true);
+      minX = Math.min(minX, next.x);
+      maxX = Math.max(maxX, next.x);
+      minY = Math.min(minY, next.y);
+      maxY = Math.max(maxY, next.y);
       previousVelocityX = next.velocityX;
       state = next;
     }
-    expect(distance).toBeGreaterThan(1);
+    expect(distance).toBeGreaterThan(2.8);
     expect(directionChanges).toBeGreaterThan(1);
+    expect(maxX - minX).toBeGreaterThan(0.7);
+    expect(maxY - minY).toBeGreaterThan(0.4);
   });
 
   it("keeps Light Pillar's five user-facing controls bounded", () => {
@@ -190,7 +203,7 @@ describe("Dynamic background", () => {
     expect(resolveSnowSettings(99, {
       flakeSize: -1,
       minFlakeSize: 99,
-      pixelResolution: 999,
+      pixelResolution: 9999,
       depthFade: 0,
       farPlane: 999,
       brightness: 99,
@@ -201,7 +214,7 @@ describe("Dynamic background", () => {
     })).toEqual({
       flakeSize: 0.001,
       minFlakeSize: 3,
-      pixelResolution: 500,
+      pixelResolution: 2000,
       speed: 5,
       depthFade: 1,
       farPlane: 50,

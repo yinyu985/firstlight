@@ -83,14 +83,17 @@ export interface FlashAutoPointerState {
 export function flashAutoPointerStep(state: FlashAutoPointerState, deltaSeconds: number): FlashAutoPointerState {
   const delta = clamp(deltaSeconds, 0, 1 / 30);
   const phase = state.phase + delta;
-  const wanderX = Math.sin(phase * 0.79 + 0.4) + Math.cos(phase * 1.37 - 0.8) * 0.55;
-  const wanderY = Math.cos(phase * 0.67 - 0.2) + Math.sin(phase * 1.61 + 1.1) * 0.5;
+  // The main path deliberately sweeps horizontally from edge to edge. The
+  // vertical waves turn each pass into a curved stroke without shortening it.
+  const sweep = phase * 0.48;
+  const curveX = 0.5 + Math.sin(sweep) * 0.38;
+  const curveY = 0.5 + Math.sin(sweep * 2) * 0.17 + Math.sin(sweep * 4) * 0.055;
   const edgeX = state.x < 0.18 ? (0.18 - state.x) * 18 : state.x > 0.82 ? (0.82 - state.x) * 18 : 0;
   const edgeY = state.y < 0.18 ? (0.18 - state.y) * 18 : state.y > 0.82 ? (0.82 - state.y) * 18 : 0;
-  const steeringX = wanderX * 0.8 + (0.5 - state.x) * 0.45 + edgeX;
-  const steeringY = wanderY * 0.8 + (0.5 - state.y) * 0.45 + edgeY;
+  const steeringX = (clamp(curveX, 0.12, 0.88) - state.x) * 5.4 + edgeX;
+  const steeringY = (clamp(curveY, 0.12, 0.88) - state.y) * 5.4 + edgeY;
   const steeringLength = Math.max(0.0001, Math.hypot(steeringX, steeringY));
-  const speed = 0.14 + Math.sin(phase * 0.43) * 0.018;
+  const speed = 0.2 + Math.sin(phase * 0.43) * 0.025;
   const targetVelocityX = (steeringX / steeringLength) * speed;
   const targetVelocityY = (steeringY / steeringLength) * speed;
   const velocityBlend = 1 - Math.exp(-delta * 2.2);
@@ -163,6 +166,9 @@ function pointerPrototype(): Pointer {
 
 export function Flash({ className = "dynamic-background", ...props }: FlashProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const automaticPointerRef = useRef<FlashAutoPointerState>({ x: 0.5, y: 0.5, velocityX: 0, velocityY: 0, phase: 0 });
+  const lastPointerPositionRef = useRef<{ x: number; y: number; initialized: boolean }>({ x: 0.5, y: 0.5, initialized: false });
+  const lastHumanInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const settings = resolveFlashSettings(props);
   const {
     simResolution: SIM_RESOLUTION,
@@ -937,15 +943,9 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     let disposed = false;
     let simulationStarted = false;
     let pointerInitialized = false;
-    let lastHumanInputTime = Number.NEGATIVE_INFINITY;
+    let lastHumanInputTime = lastHumanInputTimeRef.current;
     let automaticPointerActive = false;
-    let automaticPointer: FlashAutoPointerState = {
-      x: 0.5,
-      y: 0.5,
-      velocityX: 0,
-      velocityY: 0,
-      phase: Math.random() * Math.PI * 2
-    };
+    let automaticPointer = automaticPointerRef.current;
 
     function updateFrame() {
       animationFrameId = null;
@@ -1007,9 +1007,10 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
 
       const pointer = pointers[0];
       if (!automaticPointerActive) {
-        const x = pointerInitialized ? pointer.texcoordX : 0.5;
-        const y = pointerInitialized ? 1 - pointer.texcoordY : 0.5;
+        const x = pointerInitialized ? pointer.texcoordX : lastPointerPositionRef.current.initialized ? lastPointerPositionRef.current.x : automaticPointer.x;
+        const y = pointerInitialized ? 1 - pointer.texcoordY : lastPointerPositionRef.current.initialized ? lastPointerPositionRef.current.y : automaticPointer.y;
         automaticPointer = { ...automaticPointer, x, y, velocityX: 0, velocityY: 0 };
+        automaticPointerRef.current = automaticPointer;
         if (!pointerInitialized) {
           updatePointerDownData(pointer, -1, x * canvas!.width, y * canvas!.height);
           pointer.down = false;
@@ -1019,6 +1020,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       }
 
       automaticPointer = flashAutoPointerStep(automaticPointer, deltaSeconds);
+      automaticPointerRef.current = automaticPointer;
       updatePointerMoveData(pointer, automaticPointer.x * canvas!.width, automaticPointer.y * canvas!.height, pointer.color);
     }
 
@@ -1026,6 +1028,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       const interruptedAutomaticPointer = automaticPointerActive;
       automaticPointerActive = false;
       lastHumanInputTime = performance.now();
+      lastHumanInputTimeRef.current = lastHumanInputTime;
       return interruptedAutomaticPointer;
     }
 
@@ -1247,6 +1250,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       pointer.deltaX = 0;
       pointer.deltaY = 0;
       pointer.color = generateColor();
+      lastPointerPositionRef.current = { x: pointer.texcoordX, y: 1 - pointer.texcoordY, initialized: true };
     }
 
     function updatePointerMoveData(pointer: Pointer, posX: number, posY: number, color: ColorRGB) {
@@ -1258,6 +1262,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       pointer.deltaY = correctDeltaY(pointer.texcoordY - pointer.prevTexcoordY)!;
       pointer.moved = Math.abs(pointer.deltaX) > 0 || Math.abs(pointer.deltaY) > 0;
       pointer.color = color;
+      lastPointerPositionRef.current = { x: pointer.texcoordX, y: 1 - pointer.texcoordY, initialized: true };
     }
 
     function updatePointerUpData(pointer: Pointer) {
@@ -1335,7 +1340,12 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       return ((value - min) % range) + min;
     }
 
+    function isUiInputTarget(target: EventTarget | null): boolean {
+      return target instanceof Element && target.closest("button, input, textarea, select, a, [contenteditable='true'], [role='button'], [role='listbox'], [role='option'], [role='slider']") !== null;
+    }
+
     function handleMouseDown(event: MouseEvent) {
+      if (isUiInputTarget(event.target)) return;
       const pointer = pointers[0];
       const position = pointerPosition(event.clientX, event.clientY);
       beginHumanInput();
@@ -1346,6 +1356,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function handleMouseMove(event: MouseEvent) {
+      if (isUiInputTarget(event.target)) return;
       const pointer = pointers[0];
       const position = pointerPosition(event.clientX, event.clientY);
       const interruptedAutomaticPointer = beginHumanInput();
@@ -1360,6 +1371,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function handleTouchStart(event: TouchEvent) {
+      if (isUiInputTarget(event.target)) return;
       const touch = event.targetTouches[0];
       if (!touch) return;
       const pointer = pointers[0];
@@ -1371,6 +1383,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function handleTouchMove(event: TouchEvent) {
+      if (isUiInputTarget(event.target)) return;
       const touch = event.targetTouches[0];
       if (!touch) return;
       const pointer = pointers[0];

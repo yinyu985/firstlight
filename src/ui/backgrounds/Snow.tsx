@@ -234,7 +234,7 @@ export function resolveSnowSettings(speed = 1.35, parameters: SnowParameters = {
   return {
     flakeSize: clampValue(numericValue(parameters.flakeSize, 0.019), 0.001, 0.05),
     minFlakeSize: clampValue(numericValue(parameters.minFlakeSize, 2.75), 0.5, 3),
-    pixelResolution: Math.round(clampValue(numericValue(parameters.pixelResolution, 500), 50, 500)),
+    pixelResolution: Math.round(clampValue(numericValue(parameters.pixelResolution, 500), 50, 2000)),
     speed: clampValue(numericValue(speed, 1.35), 0.1, 5),
     depthFade: Math.round(clampValue(numericValue(parameters.depthFade, 10), 1, 20)),
     farPlane: Math.round(clampValue(numericValue(parameters.farPlane, 15), 5, 50)),

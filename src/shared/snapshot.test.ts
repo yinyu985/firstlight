@@ -784,7 +784,7 @@ describe("dynamic effect range schema", () => {
     });
     expect(findNumericRange(snow, "flakeSize")).toMatchObject({ min: 0.001, max: 0.05, step: 0.002, defaultValue: 0.019 });
     expect(findNumericRange(snow, "minFlakeSize")).toMatchObject({ min: 0.5, max: 3, step: 0.25, defaultValue: 2.75 });
-    expect(findNumericRange(snow, "pixelResolution")).toMatchObject({ min: 50, max: 500, step: 25, defaultValue: 500, integer: true });
+    expect(findNumericRange(snow, "pixelResolution")).toMatchObject({ min: 50, max: 2000, step: 25, defaultValue: 500, integer: true });
     expect(findNumericRange(snow, "direction")).toMatchObject({ min: 0, max: 360, step: 5, defaultValue: 90, integer: true });
   });
 
