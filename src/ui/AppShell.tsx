@@ -707,6 +707,7 @@ export function AppShell(props: Props) {
   const results = useMemo(() => searchBookmarks(state.bookmarks, query), [state.bookmarks, query]);
   const readonly = state.target === "online";
   const searchPosition = state.settings.features.searchPosition;
+  const searchText = state.settings.features.searchText;
   const folderTheme = useMemo(
     () => deriveFolderTheme(state.settings.background, state.settings.foreground.color),
     [state.settings.background, state.settings.foreground.color]
@@ -887,7 +888,7 @@ export function AppShell(props: Props) {
   const contentFrameStyle = contentBounds ? { width: contentBounds.width, marginLeft: contentBounds.left } : undefined;
   const searchResultStyle = contentBounds ? {
     width: contentBounds.width / 2,
-    marginLeft: contentBounds.left + (searchPosition === "center" ? contentBounds.width / 4 : searchPosition === "right" ? contentBounds.width / 2 : 0)
+    marginLeft: contentBounds.left + (searchText === "center" ? contentBounds.width / 4 : searchText === "right" ? contentBounds.width / 2 : 0)
   } : undefined;
 
   return (
@@ -958,10 +959,10 @@ export function AppShell(props: Props) {
           {query && <button onClick={() => { setQuery(""); setSearchResultsOpen(false); }} aria-label="Clear search">×</button>}
         </label></div>}
 
-        {searchPosition !== "hidden" && query && searchResultsOpen ? <div ref={searchResultsRef} className={`search-results search-${searchPosition}`} style={{ ...searchResultStyle, ...localThemeVariables(searchResultsTheme) }}>
-          {results.length ? <><div className="table-head"><span>PATH</span><span>NAME</span></div>{results.map((result, index) => (
+        {searchText !== "hidden" && query && searchResultsOpen ? <div ref={searchResultsRef} className={`search-results search-text-${searchText}`} style={{ ...searchResultStyle, ...localThemeVariables(searchResultsTheme) }}>
+          {results.length ? <>{results.map((result, index) => (
             <button key={`${result.path}-${result.item.title}-${index}`} className="search-row" disabled={!canOpenBookmark(result.item.url)} onClick={() => open(result.item)}>
-              <small>{result.path}</small><span>{result.item.title || result.item.url}</span>
+              <span>{result.item.title || result.item.url}</span>
             </button>
           ))}</> : <div className="empty">NO RESULTS</div>}
         </div> : <><div className="bookmark-table" ref={gridRef}>
