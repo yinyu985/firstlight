@@ -1,8 +1,4 @@
-import {
-  GIST_DESCRIPTION,
-  SNAPSHOT_FILE_NAME,
-  type Snapshot
-} from "./model";
+import { GIST_DESCRIPTION, SNAPSHOT_FILE_NAME, type Snapshot } from "./model";
 import { SnapshotValidationError, parseSnapshot, serializeSnapshot, snapshotHash, validateSnapshot } from "./snapshot";
 
 interface GistFile {
@@ -31,7 +27,11 @@ export interface RemoteSnapshot {
 type GitHubFailureKind = "timeout" | "interrupted" | "network";
 
 export class GitHubError extends Error {
-  constructor(message: string, readonly status?: number, readonly kind?: GitHubFailureKind) {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly kind?: GitHubFailureKind
+  ) {
     super(message);
     this.name = "GitHubError";
   }
@@ -39,7 +39,13 @@ export class GitHubError extends Error {
 
 export function normalizeGitHubToken(input: string): string {
   let token = input.trim();
-  const quotePairs: Array<[string, string]> = [["\"", "\""], ["'", "'"], ["`", "`"], ["“", "”"], ["‘", "’"]];
+  const quotePairs: Array<[string, string]> = [
+    ['"', '"'],
+    ["'", "'"],
+    ["`", "`"],
+    ["“", "”"],
+    ["‘", "’"]
+  ];
   const pair = quotePairs.find(([left, right]) => token.startsWith(left) && token.endsWith(right));
   if (pair && token.length >= 2) token = token.slice(pair[0].length, -pair[1].length).trim();
   token = token.replace(/\s+/gu, "");
@@ -88,7 +94,11 @@ export class GistClient {
       if (!response.ok) {
         if (method === "GET" && response.status >= 500 && attempt + 1 < attempts) continue;
         let detail = "";
-        try { detail = (await response.json() as { message?: string }).message ?? ""; } catch { /* noop */ }
+        try {
+          detail = ((await response.json()) as { message?: string }).message ?? "";
+        } catch {
+          /* noop */
+        }
         throw new GitHubError(detail || `GitHub request failed (${response.status})`, response.status);
       }
       return response.json() as Promise<T>;
@@ -141,9 +151,11 @@ export class GistClient {
     const discovered: Array<Pick<RemoteSnapshot, "gistId" | "htmlUrl" | "updatedAt">> = [];
     for (let page = 1; ; page += 1) {
       const gists = await this.request<GistResponse[]>(`https://api.github.com/gists?per_page=100&page=${page}`);
-      discovered.push(...gists
-        .filter((gist) => gist.public === false && gist.files[SNAPSHOT_FILE_NAME] && gist.description === GIST_DESCRIPTION)
-        .map((gist) => ({ gistId: gist.id, htmlUrl: gist.html_url, updatedAt: gist.updated_at })));
+      discovered.push(
+        ...gists
+          .filter((gist) => gist.public === false && gist.files[SNAPSHOT_FILE_NAME] && gist.description === GIST_DESCRIPTION)
+          .map((gist) => ({ gistId: gist.id, htmlUrl: gist.html_url, updatedAt: gist.updated_at }))
+      );
       if (gists.length < 100) return discovered;
     }
   }
@@ -178,7 +190,7 @@ export class GistClient {
     const discovered = await this.discover();
     for (const candidate of discovered) {
       const remote = await this.read(candidate.gistId);
-      if (await snapshotHash(remote.snapshot) === expectedHash) return remote;
+      if ((await snapshotHash(remote.snapshot)) === expectedHash) return remote;
     }
     return undefined;
   }
@@ -198,14 +210,11 @@ export class GistClient {
     if (!gistId) body.public = false;
     let gist: GistResponse;
     try {
-      gist = await this.request<GistResponse>(
-        gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists",
-        {
-          method: gistId ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        }
-      );
+      gist = await this.request<GistResponse>(gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists", {
+        method: gistId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
     } catch (error) {
       if (!gistId && error instanceof GitHubError && error.kind) {
         const recovered = await this.findSnapshotByHash(expectedHash);
@@ -239,9 +248,9 @@ export class GistClient {
       remote = await this.read(gist.id);
       independentlyRead = true;
     }
-    if (await snapshotHash(remote.snapshot) === expectedHash) return remote;
+    if ((await snapshotHash(remote.snapshot)) === expectedHash) return remote;
     if (!independentlyRead) remote = await this.read(gist.id);
-    if (await snapshotHash(remote.snapshot) !== expectedHash) {
+    if ((await snapshotHash(remote.snapshot)) !== expectedHash) {
       throw new GitHubError("GitHub stored a different Firstlight snapshot than the one that was uploaded");
     }
     return remote;

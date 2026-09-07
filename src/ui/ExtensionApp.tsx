@@ -2,11 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeSettings, type SyncNote, type SyncedSettings } from "../shared/model";
 import type { AppState, ExtensionRequest, ExtensionResponse } from "../shared/protocol";
 import { AppShell } from "./AppShell";
+import { applyStatePatch, type StatePatch } from "../shared/statePatch";
+
+let serverState: AppState | undefined;
 
 async function request(message: ExtensionRequest): Promise<AppState> {
-  const response = await chrome.runtime.sendMessage(message) as ExtensionResponse;
-  if (!response.ok || !response.state) throw new Error(response.error ?? "The extension service returned no state");
-  return response.state;
+  const response = (await chrome.runtime.sendMessage({
+    ...message,
+    compact: message.type === "SAVE_SETTINGS" || message.type === "SAVE_NOTES"
+  })) as ExtensionResponse;
+  if (response.state) serverState = response.state;
+  if (response.patch) {
+    if (!serverState) serverState = await request({ type: "GET_STATE" });
+    serverState = applyStatePatch(serverState, response.patch);
+  }
+  if (!response.ok || !serverState) throw new Error(response.error ?? "The extension service returned no state");
+  return serverState;
 }
 
 const SETTINGS_CACHE_KEY = "firstlight.extension.settings-cache";
@@ -57,22 +68,31 @@ export function ExtensionApp() {
   const settingsJobs = useRef(new WeakMap<SyncedSettings, Promise<void>>());
   const submitPendingSettingsRef = useRef<() => Promise<void>>(async () => undefined);
 
-  const withOptimisticState = useCallback((next: AppState): AppState => ({
-    ...next,
-    settings: pendingSettings.current ?? next.settings,
-    notes: pendingNotes.current ?? next.notes
-  }), []);
-  const acceptState = useCallback((next: AppState) => {
-    const optimistic = withOptimisticState(next);
-    writeCachedSettings(optimistic.settings);
-    setState(optimistic);
-  }, [withOptimisticState]);
+  const withOptimisticState = useCallback(
+    (next: AppState): AppState => ({
+      ...next,
+      settings: pendingSettings.current ?? next.settings,
+      notes: pendingNotes.current ?? next.notes
+    }),
+    []
+  );
+  const acceptState = useCallback(
+    (next: AppState) => {
+      const optimistic = withOptimisticState(next);
+      writeCachedSettings(optimistic.settings);
+      setState(optimistic);
+    },
+    [withOptimisticState]
+  );
 
   useEffect(() => {
-    void request({ type: "GET_STATE" }).then(acceptState).catch((cause) => setError(cause.message));
-    const listener = (message: { type?: string; state?: AppState }) => {
-      if (message.type === "STATE_CHANGED" && message.state) {
-        acceptState(message.state);
+    void request({ type: "GET_STATE" })
+      .then(acceptState)
+      .catch((cause) => setError(cause.message));
+    const listener = (message: { type?: string; patch?: StatePatch }) => {
+      if (message.type === "STATE_CHANGED" && message.patch && serverState) {
+        serverState = applyStatePatch(serverState, message.patch);
+        acceptState(serverState);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -85,23 +105,25 @@ export function ExtensionApp() {
     };
   }, [acceptState]);
 
-  const act = useCallback(async (message: ExtensionRequest) => {
-    if (operationPending.current) return false;
-    operationPending.current = true;
-    setBusy(true);
-    setError(undefined);
-    try {
-      acceptState(await request(message));
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Operation failed");
-      return false;
-    }
-    finally {
-      operationPending.current = false;
-      setBusy(false);
-    }
-  }, [acceptState]);
+  const act = useCallback(
+    async (message: ExtensionRequest) => {
+      if (operationPending.current) return false;
+      operationPending.current = true;
+      setBusy(true);
+      setError(undefined);
+      try {
+        acceptState(await request(message));
+        return true;
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Operation failed");
+        return false;
+      } finally {
+        operationPending.current = false;
+        setBusy(false);
+      }
+    },
+    [acceptState]
+  );
 
   const submitPendingSettings = useCallback((): Promise<void> => {
     const submitted = pendingSettings.current;
@@ -165,19 +187,22 @@ export function ExtensionApp() {
     pendingSettings.current = undefined;
   }, []);
 
-  const actAfterSettings = useCallback(async (message: ExtensionRequest) => {
-    try {
-      await flushPendingSettings();
-    } catch {
-      return false;
-    }
-    return act(message);
-  }, [act, flushPendingSettings]);
+  const actAfterSettings = useCallback(
+    async (message: ExtensionRequest) => {
+      try {
+        await flushPendingSettings();
+      } catch {
+        return false;
+      }
+      return act(message);
+    },
+    [act, flushPendingSettings]
+  );
 
   const saveSettings = useCallback((settings: SyncedSettings) => {
     pendingSettings.current = settings;
     writeCachedSettings(settings);
-    setState((current) => current ? { ...current, settings } : current);
+    setState((current) => (current ? { ...current, settings } : current));
     if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
     if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
     settingsTimer.current = window.setTimeout(() => {
@@ -186,56 +211,64 @@ export function ExtensionApp() {
     }, 120);
   }, []);
 
-  const saveNotes = useCallback(async (notes: SyncNote[]) => {
-    const generation = notesGeneration.current;
-    pendingNotes.current = notes;
-    try {
-      const next = await request({ type: "SAVE_NOTES", notes });
-      if (generation !== notesGeneration.current) return;
-      if (pendingNotes.current === notes) pendingNotes.current = undefined;
-      setError(undefined);
-      acceptState(next);
-    } catch (cause) {
-      if (generation !== notesGeneration.current) return;
-      setError(cause instanceof Error ? cause.message : "Unable to save notes");
-      throw cause;
-    }
-  }, [acceptState]);
+  const saveNotes = useCallback(
+    async (notes: SyncNote[]) => {
+      const generation = notesGeneration.current;
+      pendingNotes.current = notes;
+      try {
+        const next = await request({ type: "SAVE_NOTES", notes });
+        if (generation !== notesGeneration.current) return;
+        if (pendingNotes.current === notes) pendingNotes.current = undefined;
+        setError(undefined);
+        acceptState(next);
+      } catch (cause) {
+        if (generation !== notesGeneration.current) return;
+        setError(cause instanceof Error ? cause.message : "Unable to save notes");
+        throw cause;
+      }
+    },
+    [acceptState]
+  );
 
-  if (!state) return <div className="boot-screen"><img src="./firstlight-mark.png" alt="Firstlight" />{error && <span>{error}</span>}</div>;
+  if (!state)
+    return (
+      <div className="boot-screen">
+        <img src="./firstlight-mark.png" alt="Firstlight" />
+        {error && <span>{error}</span>}
+      </div>
+    );
 
   const openBookmark = (url: string) => {
-    const opening = state.settings.openTarget === "current-tab"
-      ? chrome.tabs.update({ url })
-      : chrome.tabs.create({ url });
-    void opening
-      .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : "Unable to open the data bookmark");
-      });
+    const opening = state.settings.openTarget === "current-tab" ? chrome.tabs.update({ url }) : chrome.tabs.create({ url });
+    void opening.catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Unable to open the data bookmark");
+    });
   };
 
-  return <AppShell
-    state={state}
-    busy={busy}
-    error={error}
-    openSetupOnLaunch={state.openSetupOnLaunch}
-    onOpenBookmark={openBookmark}
-    onSaveSettings={saveSettings}
-    onImportBookmarks={() => void act({ type: "IMPORT_BOOKMARKS" })}
-    onSaveToken={(token) => void act({ type: "SAVE_TOKEN", token })}
-    onUpload={() => void actAfterSettings({ type: "UPLOAD_NOW" })}
-    onCompareRemote={() => void actAfterSettings({ type: "COMPARE_REMOTE" })}
-    onUseLocal={async (diffId) => {
-      if (!await actAfterSettings({ type: "USE_LOCAL", diffId })) throw new Error("Unable to upload the local snapshot");
-    }}
-    onUseRemote={async (diffId) => {
-      cancelPendingSettings();
-      notesGeneration.current += 1;
-      pendingNotes.current = undefined;
-      if (!await act({ type: "USE_REMOTE", diffId })) throw new Error("Unable to restore the remote snapshot");
-    }}
-    onCloseDiff={(diffId) => void act({ type: "CLEAR_DIFF", diffId })}
-    onOpenBookmarkManager={() => void act({ type: "OPEN_BOOKMARK_MANAGER" })}
-    onSaveNotes={saveNotes}
-  />;
+  return (
+    <AppShell
+      state={state}
+      busy={busy}
+      error={error}
+      openSetupOnLaunch={state.openSetupOnLaunch}
+      onOpenBookmark={openBookmark}
+      onSaveSettings={saveSettings}
+      onImportBookmarks={() => void act({ type: "IMPORT_BOOKMARKS" })}
+      onSaveToken={(token, rememberToken) => void act({ type: "SAVE_TOKEN", token, rememberToken })}
+      onUpload={() => void actAfterSettings({ type: "UPLOAD_NOW" })}
+      onCompareRemote={() => void actAfterSettings({ type: "COMPARE_REMOTE" })}
+      onUseLocal={async (diffId) => {
+        if (!(await actAfterSettings({ type: "USE_LOCAL", diffId }))) throw new Error("Unable to upload the local snapshot");
+      }}
+      onUseRemote={async (diffId) => {
+        cancelPendingSettings();
+        notesGeneration.current += 1;
+        pendingNotes.current = undefined;
+        if (!(await act({ type: "USE_REMOTE", diffId }))) throw new Error("Unable to restore the remote snapshot");
+      }}
+      onCloseDiff={(diffId) => void act({ type: "CLEAR_DIFF", diffId })}
+      onOpenBookmarkManager={() => void act({ type: "OPEN_BOOKMARK_MANAGER" })}
+      onSaveNotes={saveNotes}
+    />
+  );
 }

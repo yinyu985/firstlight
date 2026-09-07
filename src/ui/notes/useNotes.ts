@@ -61,10 +61,12 @@ function normalizeSortMode(mode?: string | null): NoteSortMode {
 
 function getLatestNoteId(notes: Note[], sortMode: NoteSortMode): string | null {
   if (notes.length === 0) return null;
-  return [...notes].sort((a, b) => {
-    if (sortMode === "created-desc") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  })[0]?.id ?? null;
+  return (
+    [...notes].sort((a, b) => {
+      if (sortMode === "created-desc") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    })[0]?.id ?? null
+  );
 }
 
 function sortNotes(notes: Note[], sortMode: NoteSortMode): Note[] {
@@ -163,9 +165,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
       notesRef.current = syncNotes;
       setNotes(syncNotes);
       const currentSelection = selectedNoteIdRef.current;
-      const nextSelection = currentSelection && syncNotes.some((note) => note.id === currentSelection)
-        ? currentSelection
-        : getLatestNoteId(syncNotes, DEFAULT_SORT_MODE);
+      const nextSelection =
+        currentSelection && syncNotes.some((note) => note.id === currentSelection) ? currentSelection : getLatestNoteId(syncNotes, DEFAULT_SORT_MODE);
       selectedNoteIdRef.current = nextSelection;
       setSelectedNoteId(nextSelection);
       setIsReady(true);
@@ -185,9 +186,10 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     setNotes(stored.notes);
     setSortModeState(initialSortMode);
 
-    const nextSelection = stored.selectedNoteId && seededNotes.some((note) => note.id === stored.selectedNoteId)
-      ? stored.selectedNoteId
-      : getLatestNoteId(seededNotes, initialSortMode);
+    const nextSelection =
+      stored.selectedNoteId && seededNotes.some((note) => note.id === stored.selectedNoteId)
+        ? stored.selectedNoteId
+        : getLatestNoteId(seededNotes, initialSortMode);
     selectedNoteIdRef.current = nextSelection;
     setSelectedNoteId(nextSelection);
     setIsReady(true);
@@ -230,23 +232,25 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
           if (oldest !== undefined) submittedVersionsRef.current.delete(oldest);
         }
       }
-      void Promise.resolve(onSave(payload)).then(() => {
-        inFlightVersionsRef.current.delete(version);
-        if (sequence >= successfulSaveSequenceRef.current) {
-          successfulSaveSequenceRef.current = sequence;
-          savedNotesVersionRef.current = version;
-        }
-      }).catch(() => {
-        inFlightVersionsRef.current.delete(version);
-        submittedVersionsRef.current.delete(version);
-        submittedVersionOrderRef.current = submittedVersionOrderRef.current.filter((item) => item !== version);
-        if (persistencePausedRef.current) return;
-        if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
-        retryTimer.current = window.setTimeout(() => {
-          retryTimer.current = null;
-          setPersistenceRevision((current) => current + 1);
-        }, 1_000);
-      });
+      void Promise.resolve(onSave(payload))
+        .then(() => {
+          inFlightVersionsRef.current.delete(version);
+          if (sequence >= successfulSaveSequenceRef.current) {
+            successfulSaveSequenceRef.current = sequence;
+            savedNotesVersionRef.current = version;
+          }
+        })
+        .catch(() => {
+          inFlightVersionsRef.current.delete(version);
+          submittedVersionsRef.current.delete(version);
+          submittedVersionOrderRef.current = submittedVersionOrderRef.current.filter((item) => item !== version);
+          if (persistencePausedRef.current) return;
+          if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+          retryTimer.current = window.setTimeout(() => {
+            retryTimer.current = null;
+            setPersistenceRevision((current) => current + 1);
+          }, 1_000);
+        });
     }, AUTO_SAVE_MS);
   }, [isReady, notes, onSave, persistenceRevision]);
 
@@ -264,33 +268,34 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     }, 120);
   }, [initialNotes, isReady, notes, sortMode, selectedNoteId, onSave]);
 
-  useEffect(() => () => {
-    if (persistTimer.current !== null) window.clearTimeout(persistTimer.current);
-    if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
-    if (!readyRenderedRef.current || persistencePausedRef.current) return;
+  useEffect(
+    () => () => {
+      if (persistTimer.current !== null) window.clearTimeout(persistTimer.current);
+      if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+      if (!readyRenderedRef.current || persistencePausedRef.current) return;
 
-    const latestNotes = notesRef.current;
-    const latestOnSave = onSaveRef.current;
-    if (latestOnSave) {
-      const payload = latestNotes.map(toSyncNote);
-      if (JSON.stringify(payload) !== savedNotesVersionRef.current) {
-        void Promise.resolve(latestOnSave(payload)).catch(() => undefined);
+      const latestNotes = notesRef.current;
+      const latestOnSave = onSaveRef.current;
+      if (latestOnSave) {
+        const payload = latestNotes.map(toSyncNote);
+        if (JSON.stringify(payload) !== savedNotesVersionRef.current) {
+          void Promise.resolve(latestOnSave(payload)).catch(() => undefined);
+        }
+      } else if (initialNotesRef.current === undefined) {
+        const selectedId = selectedNoteIdRef.current;
+        const selected = latestNotes.some((note) => note.id === selectedId) ? selectedId : null;
+        saveNotesState({ notes: latestNotes, sortMode: sortModeRef.current, selectedNoteId: selected });
       }
-    } else if (initialNotesRef.current === undefined) {
-      const selectedId = selectedNoteIdRef.current;
-      const selected = latestNotes.some((note) => note.id === selectedId) ? selectedId : null;
-      saveNotesState({ notes: latestNotes, sortMode: sortModeRef.current, selectedNoteId: selected });
-    }
-  }, []);
+    },
+    []
+  );
 
   const updateSelectedNote = useCallback((field: "title" | "content", value: string) => {
     const selectedId = selectedNoteIdRef.current;
     if (!selectedId) return;
     const timestamp = toEastEightTime();
     setNotes((current) => {
-      const next = current.map((note) => note.id === selectedId && note[field] !== value
-        ? { ...note, [field]: value, updatedAt: timestamp }
-        : note);
+      const next = current.map((note) => (note.id === selectedId && note[field] !== value ? { ...note, [field]: value, updatedAt: timestamp } : note));
       notesRef.current = next;
       return next;
     });

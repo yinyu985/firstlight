@@ -22,11 +22,7 @@ vi.mock("../shared/gist", async () => {
   return { ...actual, GistClient: MockGistClient };
 });
 
-type MessageListener = (
-  request: unknown,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: ExtensionResponse) => void
-) => boolean | undefined;
+type MessageListener = (request: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: ExtensionResponse) => void) => boolean | undefined;
 
 const LOCAL_TIME = "2026-08-20T17:00:00.000+08:00";
 const REMOTE_TIME = "2026-08-20T09:01:00.000Z";
@@ -39,17 +35,19 @@ function chromeMock(initialState: StoredState, initialBookmarks: BookmarkItem[] 
   const messageListeners: MessageListener[] = [];
   const startupListeners: Array<() => void> = [];
   const alarmListeners: Array<(alarm: chrome.alarms.Alarm) => void> = [];
-  let storedState = structuredClone(initialState);
+  const storageValues: Record<string, unknown> = { firstlight: structuredClone(initialState) };
+  const sessionValues: Record<string, unknown> = {};
   let nextBookmarkId = 10;
   let createFailures = 0;
   let failEveryCreate = false;
 
-  const toTreeNodes = (items: BookmarkItem[]): chrome.bookmarks.BookmarkTreeNode[] => items.map((item) => {
-    const id = String(nextBookmarkId++);
-    return item.url !== undefined
-      ? { id, parentId: "1", index: 0, title: item.title, url: item.url }
-      : { id, parentId: "1", index: 0, title: item.title, children: toTreeNodes(item.children ?? []) };
-  });
+  const toTreeNodes = (items: BookmarkItem[]): chrome.bookmarks.BookmarkTreeNode[] =>
+    items.map((item) => {
+      const id = String(nextBookmarkId++);
+      return item.url !== undefined
+        ? { id, parentId: "1", index: 0, title: item.title, url: item.url }
+        : { id, parentId: "1", index: 0, title: item.title, children: toTreeNodes(item.children ?? []) };
+    });
   const bar: chrome.bookmarks.BookmarkTreeNode = {
     id: "1",
     parentId: "0",
@@ -74,12 +72,11 @@ function chromeMock(initialState: StoredState, initialBookmarks: BookmarkItem[] 
     }
     return nodes.some((node) => removeNode(id, node.children ?? []));
   };
-  const bookmarkItems = (nodes = bar.children ?? []): BookmarkItem[] => nodes.map((node) => node.url !== undefined
-    ? { title: node.title, url: node.url }
-    : { title: node.title, children: bookmarkItems(node.children ?? []) });
+  const bookmarkItems = (nodes = bar.children ?? []): BookmarkItem[] =>
+    nodes.map((node) => (node.url !== undefined ? { title: node.title, url: node.url } : { title: node.title, children: bookmarkItems(node.children ?? []) }));
 
   const storageSet = vi.fn(async (value: Record<string, unknown>) => {
-    if (value.firstlight !== undefined) storedState = structuredClone(value.firstlight as StoredState);
+    Object.assign(storageValues, structuredClone(value));
   });
   const bookmarkListeners = {
     created: vi.fn(),
@@ -111,15 +108,25 @@ function chromeMock(initialState: StoredState, initialBookmarks: BookmarkItem[] 
   const api = {
     storage: {
       local: {
-        get: vi.fn(async () => ({ firstlight: structuredClone(storedState) })),
+        get: vi.fn(async () => structuredClone(storageValues)),
         set: storageSet
+      },
+      session: {
+        get: vi.fn(async () => structuredClone(sessionValues)),
+        set: vi.fn(async (values: Record<string, unknown>) => {
+          Object.assign(sessionValues, structuredClone(values));
+        })
       }
     },
     bookmarks: {
       getTree: vi.fn(async () => [{ id: "0", title: "", children: [structuredClone(bar)] }]),
       getChildren: vi.fn(async (parentId: string) => structuredClone((parentId === "1" ? bar : findNode(parentId))?.children ?? [])),
-      remove: vi.fn(async (id: string) => { removeNode(id); }),
-      removeTree: vi.fn(async (id: string) => { removeNode(id); }),
+      remove: vi.fn(async (id: string) => {
+        removeNode(id);
+      }),
+      removeTree: vi.fn(async (id: string) => {
+        removeNode(id);
+      }),
       create: bookmarksCreate,
       onCreated: { addListener: bookmarkListeners.created },
       onRemoved: { addListener: bookmarkListeners.removed },
@@ -148,10 +155,21 @@ function chromeMock(initialState: StoredState, initialBookmarks: BookmarkItem[] 
     bookmarkItems,
     bookmarkListeners,
     bookmarksCreate,
-    getStored: () => structuredClone(storedState),
+    getStored: (): StoredState => {
+      const state = structuredClone(storageValues.firstlight) as StoredState & { storageVersion?: number };
+      if (state.storageVersion === 2) {
+        for (const field of ["notes", "pendingDiff", "recoveryPoints"])
+          Object.assign(state, { [field]: structuredClone(storageValues[`firstlight.${field}`]) ?? undefined });
+      }
+      return state;
+    },
     messageListeners,
-    setCreateFailures: (count: number) => { createFailures = count; },
-    setFailEveryCreate: (value: boolean) => { failEveryCreate = value; },
+    setCreateFailures: (count: number) => {
+      createFailures = count;
+    },
+    setFailEveryCreate: (value: boolean) => {
+      failEveryCreate = value;
+    },
     startupListeners,
     storageSet
   };
@@ -242,9 +260,7 @@ describe("extension background integration", () => {
     const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
     const state = await connectedState(baseline);
     state.settingsVersion = 1;
-    state.settings = Object.fromEntries(
-      Object.entries(baseline.config).sort(([left], [right]) => left.localeCompare(right))
-    ) as unknown as SyncedSettings;
+    state.settings = Object.fromEntries(Object.entries(baseline.config).sort(([left], [right]) => left.localeCompare(right))) as unknown as SyncedSettings;
     const originalBaseline = structuredClone(state.baseline);
     const mock = chromeMock(state);
     vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
@@ -329,6 +345,8 @@ describe("extension background integration", () => {
     await import("./background");
     await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
     await flushImmediateTimers();
+    // WebCrypto runs outside fake timers; wait for the queued check to commit.
+    await vi.waitFor(() => expect(mock.getStored().sync?.phase).toBe("conflict"));
 
     expect(gistMock.update).not.toHaveBeenCalled();
     expect(mock.getStored().pendingDiff).toMatchObject({
@@ -367,10 +385,28 @@ describe("extension background integration", () => {
     expect(response.ok).toBe(true);
     expect(mock.bookmarkItems()).toEqual(target.bookmarks);
     expect(mock.getStored().restoreJournal).toBeUndefined();
-    expect(mock.getStored().recoveryPoints).toEqual([
-      expect.objectContaining({ snapshot: expect.objectContaining({ bookmarks: local.bookmarks }) })
-    ]);
+    expect(mock.getStored().recoveryPoints).toEqual([expect.objectContaining({ snapshot: expect.objectContaining({ bookmarks: local.bookmarks }) })]);
     expect(response.state?.sync.phase).toBe("synced");
+  });
+
+  it("reports a startup storage failure without dropping the error notification", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(baseline);
+    state.settingsVersion = 1;
+    const mock = chromeMock(state);
+    gistMock.read.mockRejectedValue(new Error("Remote unavailable"));
+    mock.storageSet.mockRejectedValue(new Error("Storage unavailable"));
+    vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    await vi.waitFor(() =>
+      expect(mock.api.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          patch: expect.objectContaining({ sync: expect.objectContaining({ phase: "error" }) })
+        })
+      )
+    );
+    expect(gistMock.update).not.toHaveBeenCalled();
   });
 
   it("rolls back a failed restore before returning an error", async () => {
@@ -504,13 +540,13 @@ describe("extension background integration", () => {
     expect(mock.getStored().sync?.phase).toBe("synced");
   });
 
-  it("turns a pending automatic upload into Diff when the remote changed", async () => {
+  it.each([REMOTE_TIME, "2026-08-20T09:05:00.000Z"])("turns a pending automatic upload into Diff when remote content changed at %s", async (remoteTime) => {
     const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
     const changedRemote = snapshotFrom([{ title: "Remote", url: "https://remote.example" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
     const state = await connectedState(baseline);
     state.pendingUpload = { dueAt: Date.now() - 1, attempts: 0 };
     const mock = chromeMock(state);
-    gistMock.read.mockResolvedValue(remote(changedRemote, "2026-08-20T09:05:00.000Z"));
+    gistMock.read.mockResolvedValue(remote(changedRemote, remoteTime));
     vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
 
     await import("./background");
@@ -521,6 +557,23 @@ describe("extension background integration", () => {
     expect(gistMock.update).not.toHaveBeenCalled();
     expect(mock.getStored().pendingUpload).toBeUndefined();
     expect(mock.getStored().pendingDiff).toMatchObject({ right: { bookmarks: changedRemote.bookmarks } });
+  });
+
+  it("refuses USE_LOCAL when the remote changed after the user reviewed the diff", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const first = snapshotFrom([{ title: "Remote one", url: "https://one.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const second = snapshotFrom([{ title: "Remote two", url: "https://two.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(local));
+    vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
+    gistMock.read.mockResolvedValue(remote(first));
+    await import("./background");
+    const comparison = await sendRequest(mock.messageListeners[0], { type: "COMPARE_REMOTE" });
+    gistMock.read.mockResolvedValue(remote(second));
+    const response = await sendRequest(mock.messageListeners[0], { type: "USE_LOCAL", diffId: comparison.state!.diff!.id });
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain("out of date");
+    expect(gistMock.update).not.toHaveBeenCalled();
+    expect(response.state?.diff?.right.bookmarks).toEqual(second.bookmarks);
   });
 
   it("keeps a failed automatic upload pending with bounded backoff", async () => {

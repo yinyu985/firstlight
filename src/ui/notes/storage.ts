@@ -39,17 +39,11 @@ function parseState(raw: string | null): StoredNotesState {
     const parsed = JSON.parse(raw);
     if (!isObject(parsed)) return EMPTY_STATE;
 
-    const notes = Array.isArray(parsed.notes)
-      ? parsed.notes.filter(isValidNote)
-      : [];
+    const notes = Array.isArray(parsed.notes) ? parsed.notes.filter(isValidNote) : [];
 
-    const sortMode = isValidSortMode(parsed.sortMode)
-      ? parsed.sortMode
-      : EMPTY_STATE.sortMode;
+    const sortMode = isValidSortMode(parsed.sortMode) ? parsed.sortMode : EMPTY_STATE.sortMode;
 
-    const selectedNoteId = typeof parsed.selectedNoteId === "string" || parsed.selectedNoteId === null
-      ? parsed.selectedNoteId
-      : null;
+    const selectedNoteId = typeof parsed.selectedNoteId === "string" || parsed.selectedNoteId === null ? parsed.selectedNoteId : null;
 
     const selected = notes.some((note) => note.id === selectedNoteId);
 

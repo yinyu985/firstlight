@@ -3,8 +3,7 @@ import { createDiffId } from "./model";
 
 describe("createDiffId", () => {
   it("is stable for the same semantic hashes and remote revision", () => {
-    expect(createDiffId("remote", "left", "right", "revision"))
-      .toBe(createDiffId("remote", "left", "right", "revision"));
+    expect(createDiffId("remote", "left", "right", "revision")).toBe(createDiffId("remote", "left", "right", "revision"));
   });
 
   it("changes when either side or the remote revision changes", () => {

@@ -21,14 +21,15 @@ export interface AppState {
   diff?: DiffPayload;
   gistUrl?: string;
   token?: string;
+  rememberToken?: boolean;
   tokenConfigured: boolean;
   openSetupOnLaunch: boolean;
 }
 
-export type ExtensionRequest =
+export type ExtensionRequest = (
   | { type: "GET_STATE" }
   | { type: "SAVE_SETTINGS"; settings: SyncedSettings }
-  | { type: "SAVE_TOKEN"; token: string }
+  | { type: "SAVE_TOKEN"; token: string; rememberToken?: boolean }
   | { type: "SAVE_NOTES"; notes: SyncNote[] }
   | { type: "UPLOAD_NOW" }
   | { type: "IMPORT_BOOKMARKS" }
@@ -36,11 +37,13 @@ export type ExtensionRequest =
   | { type: "USE_LOCAL"; diffId: string }
   | { type: "USE_REMOTE"; diffId: string }
   | { type: "CLEAR_DIFF"; diffId: string }
-  | { type: "OPEN_BOOKMARK_MANAGER" };
+  | { type: "OPEN_BOOKMARK_MANAGER" }
+) & { compact?: boolean };
 
 export interface ExtensionResponse {
   ok: boolean;
   state?: AppState;
+  patch?: import("./statePatch").StatePatch;
   error?: string;
 }
 
@@ -48,6 +51,7 @@ export interface StoredState {
   settingsVersion?: number;
   syncEnabled?: boolean;
   token?: string;
+  rememberToken?: boolean;
   gistId?: string;
   gistUrl?: string;
   localUpdatedAt?: string;

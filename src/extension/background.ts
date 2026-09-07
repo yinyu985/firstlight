@@ -19,8 +19,10 @@ import type { AppState, ExtensionRequest, ExtensionResponse, StoredState } from 
 import { parseExtensionRequest } from "../shared/requestValidation";
 import { snapshotHash, stableStringify, validateNotes, validateSnapshot } from "../shared/snapshot";
 import { canAutoUpload, decideSyncWithRevision } from "../shared/sync-decision";
+import { StateRepository } from "./stateRepository";
+import { statePatch } from "../shared/statePatch";
 
-const STORAGE_KEY = "firstlight";
+const repository = new StateRepository(chrome.storage.local, chrome.storage.session);
 const UPLOAD_ALARM = "firstlight-pending-upload";
 const UPLOAD_DEBOUNCE_MS = 10_000;
 const UPLOAD_RETRY_MAX_MS = 5 * 60_000;
@@ -45,7 +47,10 @@ class HandledOperationError extends Error {
 
 function queue<T>(task: () => Promise<T>): Promise<T> {
   const next = operation.then(task, task);
-  operation = next.then(() => undefined, () => undefined);
+  operation = next.then(
+    () => undefined,
+    () => undefined
+  );
   return next;
 }
 
@@ -58,12 +63,7 @@ function cancelScheduledUpload(clearPending = false): void {
   if (clearPending) memory.pendingUpload = undefined;
 }
 
-function remoteDiff(
-  left: Snapshot,
-  remote: Pick<RemoteSnapshot, "gistId" | "updatedAt" | "snapshot">,
-  leftHash: string,
-  rightHash: string
-): DiffPayload {
+function remoteDiff(left: Snapshot, remote: Pick<RemoteSnapshot, "gistId" | "updatedAt" | "snapshot">, leftHash: string, rightHash: string): DiffPayload {
   return {
     id: createDiffId("remote", leftHash, rightHash, remote.updatedAt),
     source: "remote",
@@ -85,7 +85,7 @@ function requirePendingDiff(diffId: string): DiffPayload {
 }
 
 async function saveMemory(): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY]: memory });
+  await repository.save(memory);
 }
 
 function sanitizeNode(node: chrome.bookmarks.BookmarkTreeNode): BookmarkItem {
@@ -158,11 +158,16 @@ async function refreshPendingDiffLeft(local = currentSnapshot()): Promise<void> 
   if (!diff) return;
   const leftHash = await snapshotHash(local);
   if (leftHash === diff.leftHash) return;
-  memory.pendingDiff = remoteDiff(local, {
-    gistId: diff.gistId,
-    updatedAt: diff.remoteUpdatedAt,
-    snapshot: diff.right
-  }, leftHash, diff.rightHash);
+  memory.pendingDiff = remoteDiff(
+    local,
+    {
+      gistId: diff.gistId,
+      updatedAt: diff.remoteUpdatedAt,
+      snapshot: diff.right
+    },
+    leftHash,
+    diff.rightHash
+  );
   memory.sync = {
     phase: "conflict",
     message: "Local data changed. Review the updated comparison.",
@@ -182,13 +187,18 @@ function appState(): AppState {
     diff: memory.pendingDiff,
     gistUrl: memory.gistUrl,
     token: memory.token,
+    rememberToken: memory.rememberToken,
     tokenConfigured: Boolean(memory.token),
     openSetupOnLaunch
   };
 }
 
+let lastBroadcast: AppState | undefined;
 function broadcast(): void {
-  chrome.runtime.sendMessage({ type: "STATE_CHANGED", state: appState() }).catch(() => undefined);
+  const next = appState();
+  const patch = statePatch(lastBroadcast, next);
+  lastBroadcast = next;
+  if (Object.keys(patch).length) chrome.runtime.sendMessage({ type: "STATE_CHANGED", patch }).catch(() => undefined);
 }
 
 async function setStatus(status: SyncStatus): Promise<void> {
@@ -208,6 +218,7 @@ async function setStatusBestEffort(status: SyncStatus): Promise<void> {
     if (status.phase === "error" || status.phase === "conflict") {
       memory.toast = { id: crypto.randomUUID(), message: status.message, expiresAt: Date.now() + 10_000 };
     }
+    broadcast();
   }
 }
 
@@ -244,7 +255,7 @@ async function overwriteAndVerifySnapshot(target: Snapshot): Promise<void> {
   memory.notes = target.notes;
   bookmarks = await readBookmarks();
   const verified = snapshotFrom(bookmarks, memory.settings, memory.notes, target.updatedAt);
-  if (await snapshotHash(verified) !== await snapshotHash(target)) {
+  if ((await snapshotHash(verified)) !== (await snapshotHash(target))) {
     throw new Error("Restored bookmarks failed verification");
   }
   memory.localUpdatedAt = target.updatedAt;
@@ -414,15 +425,19 @@ function scheduleStartupRemoteCheck(): void {
   void queue(() => checkRemoteOnStartup())
     .catch(async (error) => {
       startupRemoteCheckRequested = false;
-      if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
-      else await setStatus({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+      try {
+        if (isBadCredentials(error)) await deactivateRemoteSync("Invalid GitHub token");
+        else await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+      } catch (statusError) {
+        await setStatusBestEffort({ phase: "error", message: errorMessage(statusError), gistId: memory.gistId });
+      }
     })
     .finally(() => {
       startupRemoteCheckPending = false;
     });
 }
 
-async function upload(force = false): Promise<void> {
+async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
   assertRestoreComplete();
   bookmarks = await readBookmarks();
   const local = validateSnapshot(currentSnapshot());
@@ -433,15 +448,25 @@ async function upload(force = false): Promise<void> {
     remote = await resolveGist(client, true);
     if (!remote) return;
 
+    if (reviewed) {
+      const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
+      if (remote.gistId !== reviewed.gistId || localHash !== reviewed.leftHash || remoteHash !== reviewed.rightHash) {
+        cancelScheduledUpload(true);
+        memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
+        memory.gistUrl = remote.htmlUrl;
+        await setStatusBestEffort({
+          phase: "conflict",
+          message: "Local or remote data changed. Review the updated comparison.",
+          gistId: remote.gistId,
+          remoteUpdatedAt: remote.updatedAt
+        });
+        throw new HandledOperationError("The comparison is out of date. Review the latest diff before overwriting remote data.");
+      }
+    }
+
     if (memory.baseline && !force) {
       const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
-      const decision = decideSyncWithRevision(
-        localHash,
-        remoteHash,
-        memory.baseline.localHash,
-        memory.baseline.remoteUpdatedAt,
-        remote.updatedAt
-      );
+      const decision = decideSyncWithRevision(localHash, remoteHash, memory.baseline.localHash, memory.baseline.remoteUpdatedAt, remote.updatedAt);
       if (decision === "conflict" || decision === "restore") {
         cancelScheduledUpload(true);
         memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
@@ -543,12 +568,14 @@ function triggerPendingUpload(): void {
       memory.pendingUpload = { dueAt: Date.now() + retryDelay, attempts };
       await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
     }
-  }).catch(async (error) => {
-    await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
-  }).finally(() => {
-    pendingUploadRunning = false;
-    if (memory.pendingUpload) armPendingUpload();
-  });
+  })
+    .catch(async (error) => {
+      await setStatusBestEffort({ phase: "error", message: errorMessage(error), gistId: memory.gistId });
+    })
+    .finally(() => {
+      pendingUploadRunning = false;
+      if (memory.pendingUpload) armPendingUpload();
+    });
 }
 
 async function compareRemote(): Promise<void> {
@@ -585,11 +612,16 @@ async function useLocal(diffId: string): Promise<void> {
   const local = currentSnapshot();
   const leftHash = await snapshotHash(local);
   if (leftHash !== diff.leftHash) {
-    memory.pendingDiff = remoteDiff(local, {
-      gistId: diff.gistId,
-      updatedAt: diff.remoteUpdatedAt,
-      snapshot: diff.right
-    }, leftHash, diff.rightHash);
+    memory.pendingDiff = remoteDiff(
+      local,
+      {
+        gistId: diff.gistId,
+        updatedAt: diff.remoteUpdatedAt,
+        snapshot: diff.right
+      },
+      leftHash,
+      diff.rightHash
+    );
     await setStatusBestEffort({
       phase: "conflict",
       message: "Local data changed. Review the updated comparison.",
@@ -598,7 +630,7 @@ async function useLocal(diffId: string): Promise<void> {
     });
     throw new HandledOperationError("Local data changed since the comparison. Review the latest diff before overwriting remote data.");
   }
-  await upload(true);
+  await upload(true, diff);
 }
 
 async function useRemote(diffId: string): Promise<void> {
@@ -639,10 +671,15 @@ async function clearDiff(diffId: string): Promise<void> {
 
 function validRestoreJournal(): { point: RecoveryPoint } | undefined {
   const journal = memory.restoreJournal;
-  if (!journal ||
-    typeof journal.recoveryPointId !== "string" || !journal.recoveryPointId ||
-    typeof journal.targetHash !== "string" || !/^[0-9a-f]{64}$/u.test(journal.targetHash) ||
-    typeof journal.startedAt !== "string" || Number.isNaN(Date.parse(journal.startedAt))) {
+  if (
+    !journal ||
+    typeof journal.recoveryPointId !== "string" ||
+    !journal.recoveryPointId ||
+    typeof journal.targetHash !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(journal.targetHash) ||
+    typeof journal.startedAt !== "string" ||
+    Number.isNaN(Date.parse(journal.startedAt))
+  ) {
     return undefined;
   }
   const point = memory.recoveryPoints?.find((candidate) => candidate.id === journal.recoveryPointId);
@@ -693,8 +730,7 @@ function normalizeStoredSettings(raw: unknown): { settings: SyncedSettings; chan
 
 async function initialize(): Promise<void> {
   if (initialized) return;
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
-  memory = (stored[STORAGE_KEY] as StoredState | undefined) ?? {};
+  memory = await repository.load();
   let memoryChanged = false;
   const normalizedSettings = normalizeStoredSettings(memory.settings);
   memory.settings = normalizedSettings.settings;
@@ -718,25 +754,33 @@ async function initialize(): Promise<void> {
     memoryChanged = true;
   }
   const recoveryPoints = (memory.recoveryPoints ?? []).filter((point) => {
-    try { validateSnapshot(point.snapshot); return true; }
-    catch { return false; }
+    try {
+      validateSnapshot(point.snapshot);
+      return true;
+    } catch {
+      return false;
+    }
   });
   if (recoveryPoints.length !== (memory.recoveryPoints ?? []).length) memoryChanged = true;
   memory.recoveryPoints = recoveryPoints;
-  if (memory.pendingUpload && (
-    typeof memory.pendingUpload.dueAt !== "number" || !Number.isFinite(memory.pendingUpload.dueAt) ||
-    typeof memory.pendingUpload.attempts !== "number" || !Number.isInteger(memory.pendingUpload.attempts) ||
-    memory.pendingUpload.attempts < 0
-  )) {
+  if (
+    memory.pendingUpload &&
+    (typeof memory.pendingUpload.dueAt !== "number" ||
+      !Number.isFinite(memory.pendingUpload.dueAt) ||
+      typeof memory.pendingUpload.attempts !== "number" ||
+      !Number.isInteger(memory.pendingUpload.attempts) ||
+      memory.pendingUpload.attempts < 0)
+  ) {
     memory.pendingUpload = undefined;
     memoryChanged = true;
   }
-  if (memory.baseline && (
-    typeof memory.baseline.localHash !== "string" ||
-    typeof memory.baseline.remoteHash !== "string" ||
-    typeof memory.baseline.remoteUpdatedAt !== "string" ||
-    memory.baseline.localHash !== memory.baseline.remoteHash
-  )) {
+  if (
+    memory.baseline &&
+    (typeof memory.baseline.localHash !== "string" ||
+      typeof memory.baseline.remoteHash !== "string" ||
+      typeof memory.baseline.remoteUpdatedAt !== "string" ||
+      memory.baseline.localHash !== memory.baseline.remoteHash)
+  ) {
     memory.baseline = undefined;
     memoryChanged = true;
   }
@@ -746,10 +790,16 @@ async function initialize(): Promise<void> {
       const left = validateSnapshot(candidate.left);
       const right = validateSnapshot(candidate.right);
       const [leftHash, rightHash] = await Promise.all([snapshotHash(left), snapshotHash(right)]);
-      if (candidate.source !== "remote" || typeof candidate.gistId !== "string" || !candidate.gistId ||
-        typeof candidate.remoteUpdatedAt !== "string" || !candidate.remoteUpdatedAt ||
-        candidate.leftHash !== leftHash || candidate.rightHash !== rightHash ||
-        candidate.id !== createDiffId("remote", leftHash, rightHash, candidate.remoteUpdatedAt)) {
+      if (
+        candidate.source !== "remote" ||
+        typeof candidate.gistId !== "string" ||
+        !candidate.gistId ||
+        typeof candidate.remoteUpdatedAt !== "string" ||
+        !candidate.remoteUpdatedAt ||
+        candidate.leftHash !== leftHash ||
+        candidate.rightHash !== rightHash ||
+        candidate.id !== createDiffId("remote", leftHash, rightHash, candidate.remoteUpdatedAt)
+      ) {
         throw new Error("Invalid stored diff metadata");
       }
       memory.pendingDiff = { ...candidate, left, right, leftHash, rightHash };
@@ -760,9 +810,10 @@ async function initialize(): Promise<void> {
   }
 
   if (normalizedSettings.repair !== "none") {
-    const message = normalizedSettings.repair === "reset"
-      ? "Stored settings were invalid and were reset to safe defaults"
-      : "Some stored settings were invalid and were repaired";
+    const message =
+      normalizedSettings.repair === "reset"
+        ? "Stored settings were invalid and were reset to safe defaults"
+        : "Some stored settings were invalid and were repaired";
     memory.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 };
     memory.baseline = undefined;
     memory.localUpdatedAt = eastEightTimestamp();
@@ -776,9 +827,13 @@ async function initialize(): Promise<void> {
     memory.sync = { phase: "local-only", message: "Remote not configured" };
     memoryChanged = true;
   }
-  if (!memory.restoreJournal && memory.token && memory.gistId && memory.sync && (
-    memory.sync.phase === "uploading" || memory.sync.phase === "restoring" || memory.sync.phase === "discovering"
-  )) {
+  if (
+    !memory.restoreJournal &&
+    memory.token &&
+    memory.gistId &&
+    memory.sync &&
+    (memory.sync.phase === "uploading" || memory.sync.phase === "restoring" || memory.sync.phase === "discovering")
+  ) {
     memory.sync = { phase: "discovering", message: "Checking remote…", gistId: memory.gistId };
     memoryChanged = true;
   }
@@ -796,11 +851,16 @@ async function initialize(): Promise<void> {
     const local = currentSnapshot();
     const leftHash = await snapshotHash(local);
     if (leftHash !== memory.pendingDiff.leftHash) {
-      memory.pendingDiff = remoteDiff(local, {
-        gistId: memory.pendingDiff.gistId,
-        updatedAt: memory.pendingDiff.remoteUpdatedAt,
-        snapshot: memory.pendingDiff.right
-      }, leftHash, memory.pendingDiff.rightHash);
+      memory.pendingDiff = remoteDiff(
+        local,
+        {
+          gistId: memory.pendingDiff.gistId,
+          updatedAt: memory.pendingDiff.remoteUpdatedAt,
+          snapshot: memory.pendingDiff.right
+        },
+        leftHash,
+        memory.pendingDiff.rightHash
+      );
       memory.sync = {
         phase: "conflict",
         message: "Local data changed. Review the updated comparison.",
@@ -828,7 +888,8 @@ function ensureInitialized(): Promise<void> {
 async function handle(request: ExtensionRequest): Promise<AppState> {
   await ensureInitialized();
   switch (request.type) {
-    case "GET_STATE": break;
+    case "GET_STATE":
+      break;
     case "SAVE_SETTINGS":
       memory.settings = settingsFromSnapshot(validateSnapshot(snapshotFrom([], request.settings, [])));
       memory.localUpdatedAt = touchLocalUpdatedAt();
@@ -854,6 +915,7 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
     case "SAVE_TOKEN":
       cancelScheduledUpload(true);
       memory.token = normalizeGitHubToken(request.token) || undefined;
+      memory.rememberToken = request.rememberToken ?? false;
       memory.gistId = undefined;
       memory.gistUrl = undefined;
       memory.baseline = undefined;
@@ -863,14 +925,29 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
       if (memory.token) await checkRemoteOnStartup(true);
       else await setStatus({ phase: "local-only", message: "Local only" });
       break;
-    case "UPLOAD_NOW": await upload(true); break;
-    case "IMPORT_BOOKMARKS": await importFromChrome(); break;
-    case "COMPARE_REMOTE": await compareRemote(); break;
-    case "USE_LOCAL": await useLocal(request.diffId); break;
-    case "USE_REMOTE": await useRemote(request.diffId); break;
-    case "CLEAR_DIFF": await clearDiff(request.diffId); break;
-    case "OPEN_BOOKMARK_MANAGER": await chrome.tabs.create({ url: "chrome://bookmarks/" }); break;
-    default: throw new Error("Unsupported extension request");
+    case "UPLOAD_NOW":
+      await upload(true);
+      break;
+    case "IMPORT_BOOKMARKS":
+      await importFromChrome();
+      break;
+    case "COMPARE_REMOTE":
+      await compareRemote();
+      break;
+    case "USE_LOCAL":
+      await useLocal(request.diffId);
+      break;
+    case "USE_REMOTE":
+      await useRemote(request.diffId);
+      break;
+    case "CLEAR_DIFF":
+      await clearDiff(request.diffId);
+      break;
+    case "OPEN_BOOKMARK_MANAGER":
+      await chrome.tabs.create({ url: "chrome://bookmarks/" });
+      break;
+    default:
+      throw new Error("Unsupported extension request");
   }
   return appState();
 }
@@ -899,8 +976,12 @@ chrome.runtime.onMessage.addListener((rawRequest: unknown, _sender, sendResponse
       .catch((error) => sendResponse({ ok: false, state: appState(), error: errorMessage(error) }));
     return true;
   }
-  queue(() => handle(request))
-    .then((state) => sendResponse({ ok: true, state }))
+  queue(async () => {
+    const before = appState();
+    const state = await handle(request);
+    return request.compact ? { ok: true, patch: statePatch(before, state) } : { ok: true, state };
+  })
+    .then(sendResponse)
     .catch(async (error) => {
       const message = errorMessage(error);
       try {
@@ -960,12 +1041,18 @@ chrome.bookmarks.onMoved.addListener(onBookmarksChanged);
 chrome.bookmarks.onChildrenReordered.addListener(onBookmarksChanged);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPLOAD_ALARM) {
-    void ensureInitialized().then(triggerPendingUpload).catch(() => undefined);
+    void ensureInitialized()
+      .then(triggerPendingUpload)
+      .catch(() => undefined);
   }
 });
-chrome.runtime.onInstalled.addListener(() => { void ensureInitialized(); });
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureInitialized().catch(() => undefined);
+});
 chrome.runtime.onStartup.addListener(() => {
-  void ensureInitialized().then(scheduleStartupRemoteCheck);
+  void ensureInitialized()
+    .then(scheduleStartupRemoteCheck)
+    .catch(() => undefined);
 });
 chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({});

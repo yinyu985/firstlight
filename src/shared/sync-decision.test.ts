@@ -14,14 +14,21 @@ describe("decideSync", () => {
 });
 
 describe("decideSyncWithRevision", () => {
-  it("treats an unchanged remote revision as a local-only change even when an old baseline hash is stale", () => {
-    expect(decideSyncWithRevision("local-with-note", "remote-empty-notes", "old-schema-hash", "server-time", "server-time"))
-      .toBe("upload");
+  it("requires review when an old baseline hash is stale, even with an unchanged timestamp", () => {
+    expect(decideSyncWithRevision("local-with-note", "remote-empty-notes", "old-schema-hash", "server-time", "server-time")).toBe("conflict");
+  });
+
+  it.each([
+    ["local", "base", "upload"],
+    ["base", "remote", "restore"],
+    ["local", "remote", "conflict"],
+    ["same", "same", "adopt"]
+  ])("checks content when timestamps match: %s / %s", (local, remote, expected) => {
+    expect(decideSyncWithRevision(local, remote, "base", "same-second", "same-second")).toBe(expected);
   });
 
   it("keeps conflict detection when the remote revision really changed", () => {
-    expect(decideSyncWithRevision("local", "remote", "base", "old-time", "new-time"))
-      .toBe("conflict");
+    expect(decideSyncWithRevision("local", "remote", "base", "old-time", "new-time")).toBe("conflict");
   });
 });
 

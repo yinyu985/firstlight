@@ -4,10 +4,11 @@ import { GistClient, normalizeGitHubToken } from "./gist";
 
 afterEach(() => vi.restoreAllMocks());
 
-const jsonResponse = (value: unknown, status = 200): Response => new Response(JSON.stringify(value), {
-  status,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (value: unknown, status = 200): Response =>
+  new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 
 function gistResponse({
   id = "gist-id",
@@ -42,7 +43,8 @@ describe("normalizeGitHubToken", () => {
   });
 
   it("retries a Chrome-interrupted read without blaming the user", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new DOMException("The user aborted a request", "AbortError"))
       .mockResolvedValueOnce(new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }));
     await expect(new GistClient("github_pat_test").discover()).resolves.toEqual([]);
@@ -50,7 +52,8 @@ describe("normalizeGitHubToken", () => {
   });
 
   it("retries a timed-out GET once", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new DOMException("The operation timed out", "TimeoutError"))
       .mockResolvedValueOnce(jsonResponse([]));
 
@@ -60,7 +63,8 @@ describe("normalizeGitHubToken", () => {
 
   it("retries an interrupted PATCH once", async () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })))
       .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })));
@@ -72,7 +76,8 @@ describe("normalizeGitHubToken", () => {
 
   it("reconciles an interrupted POST instead of creating a duplicate Gist", async () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
       .mockResolvedValueOnce(jsonResponse([gistResponse({ snapshot })]))
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })));
@@ -83,39 +88,38 @@ describe("normalizeGitHubToken", () => {
   });
 
   it("does not blindly repeat an indeterminate POST", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
       .mockResolvedValueOnce(jsonResponse([]));
 
-    await expect(new GistClient("github_pat_test").create(snapshotFrom([], DEFAULT_SETTINGS)))
-      .rejects.toThrow("not repeated to avoid creating a duplicate Gist");
+    await expect(new GistClient("github_pat_test").create(snapshotFrom([], DEFAULT_SETTINGS))).rejects.toThrow(
+      "not repeated to avoid creating a duplicate Gist"
+    );
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
   it("does not retry a definite 4xx response", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValue(jsonResponse({ message: "Not Found" }, 404));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ message: "Not Found" }, 404));
 
     await expect(new GistClient("github_pat_test").discover()).rejects.toThrow("Not Found");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("paginates discovery and returns only secret Firstlight Gists", async () => {
-    const firstPage = Array.from({ length: 100 }, (_, index) => gistResponse({
-      id: `other-${index}`,
-      description: "Other Gist",
-      files: {}
-    }));
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      gistResponse({
+        id: `other-${index}`,
+        description: "Other Gist",
+        files: {}
+      })
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(firstPage))
-      .mockResolvedValueOnce(jsonResponse([
-        gistResponse({ id: "public-match", isPublic: true }),
-        gistResponse({ id: "secret-match" })
-      ]));
+      .mockResolvedValueOnce(jsonResponse([gistResponse({ id: "public-match", isPublic: true }), gistResponse({ id: "secret-match" })]));
 
-    await expect(new GistClient("github_pat_test").discover()).resolves.toEqual([
-      expect.objectContaining({ gistId: "secret-match" })
-    ]);
+    await expect(new GistClient("github_pat_test").discover()).resolves.toEqual([expect.objectContaining({ gistId: "secret-match" })]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("page=1");
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("page=2");
@@ -123,7 +127,8 @@ describe("normalizeGitHubToken", () => {
 
   it("refuses to read or update a public Gist", async () => {
     const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(gistResponse({ isPublic: true, snapshot })))
       .mockResolvedValueOnce(jsonResponse(gistResponse({ isPublic: true, snapshot })));
     const client = new GistClient("github_pat_test");
@@ -152,7 +157,8 @@ describe("normalizeGitHubToken", () => {
   it("independently reads a mismatched write response before accepting success", async () => {
     const intended = snapshotFrom([{ title: "Intended", url: "https://example.com/intended" }], DEFAULT_SETTINGS);
     const stale = snapshotFrom([{ title: "Stale", url: "https://example.com/stale" }], DEFAULT_SETTINGS);
-    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot: stale })))
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot: intended })));
 
@@ -166,10 +172,15 @@ describe("normalizeGitHubToken", () => {
   it("independently reads when inline write content fails snapshot validation", async () => {
     const intended = snapshotFrom([{ title: "Intended", url: "https://example.com/intended" }], DEFAULT_SETTINGS);
     const malformed = { ...intended, notes: {} };
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse(gistResponse({
-        files: { "firstlight.json": { content: JSON.stringify(malformed), truncated: false } }
-      })))
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse(
+          gistResponse({
+            files: { "firstlight.json": { content: JSON.stringify(malformed), truncated: false } }
+          })
+        )
+      )
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot: intended })));
 
     await expect(new GistClient("github_pat_test").create(intended)).resolves.toMatchObject({
@@ -185,13 +196,16 @@ describe("normalizeGitHubToken", () => {
       const body = JSON.parse(String(init?.body)) as { files: Record<string, { content: string }> };
       const content = body.files["firstlight.json"].content;
       expect(content).toBe(JSON.stringify(snapshot, null, 2));
-      return new Response(JSON.stringify({
-        id: "gist-id",
-        html_url: "https://gist.github.com/gist-id",
-        updated_at: "2026-08-12T04:00:00Z",
-        public: false,
-        files: { "firstlight.json": { content, truncated: false } }
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          id: "gist-id",
+          html_url: "https://gist.github.com/gist-id",
+          updated_at: "2026-08-12T04:00:00Z",
+          public: false,
+          files: { "firstlight.json": { content, truncated: false } }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     });
 
     await expect(new GistClient("github_pat_test").create(snapshot)).resolves.toMatchObject({ gistId: "gist-id" });

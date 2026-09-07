@@ -1,4 +1,11 @@
-import { isDynamicEffect, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed, type DynamicEffect, type DynamicEffectParameters } from "./dynamicEffects";
+import {
+  isDynamicEffect,
+  normalizeDynamicEffect,
+  normalizeDynamicParameters,
+  normalizeDynamicSpeed,
+  type DynamicEffect,
+  type DynamicEffectParameters
+} from "./dynamicEffects";
 export type { DynamicEffect, DynamicEffectParameters } from "./dynamicEffects";
 export const SNAPSHOT_SCHEMA_VERSION = 2 as const;
 export const SETTINGS_VERSION = 1 as const;
@@ -14,15 +21,11 @@ export type DynamicBackground =
   | { type: "dynamic"; effect: "neuroNoise"; speed: number; parameters?: DynamicEffectParameters }
   | { type: "dynamic"; effect: ColorDynamicEffect; from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
 
-export type Background =
-  | { type: "solid"; color: string }
-  | { type: "gradient"; from: string; to: string; angle: number }
-  | DynamicBackground;
+export type Background = { type: "solid"; color: string } | { type: "gradient"; from: string; to: string; angle: number } | DynamicBackground;
 
-export type DynamicEffectProfile<Effect extends DynamicEffect = DynamicEffect> =
-  Effect extends "neuroNoise"
-    ? { speed: number; parameters?: DynamicEffectParameters }
-    : { from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
+export type DynamicEffectProfile<Effect extends DynamicEffect = DynamicEffect> = Effect extends "neuroNoise"
+  ? { speed: number; parameters?: DynamicEffectParameters }
+  : { from: string; to: string; angle: number; speed: number; parameters?: DynamicEffectParameters };
 
 export type DynamicEffectProfiles = { [Effect in DynamicEffect]?: DynamicEffectProfile<Effect> };
 
@@ -115,14 +118,7 @@ export interface PendingUpload {
   attempts: number;
 }
 
-export type SyncPhase =
-  | "local-only"
-  | "discovering"
-  | "synced"
-  | "uploading"
-  | "restoring"
-  | "conflict"
-  | "error";
+export type SyncPhase = "local-only" | "discovering" | "synced" | "uploading" | "restoring" | "conflict" | "error";
 
 export interface SyncStatus {
   phase: SyncPhase;
@@ -187,9 +183,7 @@ export function eastEightTimestamp(date = new Date()): string {
 }
 
 function settingsRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function validColor(value: unknown, fallback: string): string {
@@ -211,45 +205,47 @@ function validClockPosition(value: unknown, fallback: ClockPosition): ClockPosit
 export function normalizeSettings(input: unknown): SyncedSettings {
   const settings = settingsRecord(input);
   const rawBackground = settingsRecord(settings.background);
-  const fallbackFrom = "from" in DEFAULT_SETTINGS.background
-    ? DEFAULT_SETTINGS.background.from
-    : DEFAULT_SETTINGS.background.type === "solid" ? DEFAULT_SETTINGS.background.color : "#070b12";
-  const fallbackTo = "to" in DEFAULT_SETTINGS.background
-    ? DEFAULT_SETTINGS.background.to
-    : fallbackFrom;
+  const fallbackFrom =
+    "from" in DEFAULT_SETTINGS.background
+      ? DEFAULT_SETTINGS.background.from
+      : DEFAULT_SETTINGS.background.type === "solid"
+        ? DEFAULT_SETTINGS.background.color
+        : "#070b12";
+  const fallbackTo = "to" in DEFAULT_SETTINGS.background ? DEFAULT_SETTINGS.background.to : fallbackFrom;
   const fallbackAngle = "angle" in DEFAULT_SETTINGS.background ? DEFAULT_SETTINGS.background.angle : 145;
-  const background: Background = rawBackground.type === "solid"
-    ? {
-        type: "solid",
-        color: validColor(rawBackground.color, fallbackFrom)
-      }
-    : rawBackground.type === "dynamic"
-      ? (() => {
-          const effect = normalizeDynamicEffect(rawBackground.effect);
-          if (effect === "neuroNoise") {
+  const background: Background =
+    rawBackground.type === "solid"
+      ? {
+          type: "solid",
+          color: validColor(rawBackground.color, fallbackFrom)
+        }
+      : rawBackground.type === "dynamic"
+        ? (() => {
+            const effect = normalizeDynamicEffect(rawBackground.effect);
+            if (effect === "neuroNoise") {
+              return {
+                type: "dynamic",
+                effect,
+                speed: normalizeDynamicSpeed(effect, rawBackground.speed),
+                parameters: normalizeDynamicParameters(effect, rawBackground.parameters)
+              };
+            }
             return {
               type: "dynamic",
               effect,
+              from: validColor(rawBackground.from, fallbackFrom),
+              to: validColor(rawBackground.to, fallbackTo),
+              angle: validNumber(rawBackground.angle, 0, 360, fallbackAngle),
               speed: normalizeDynamicSpeed(effect, rawBackground.speed),
               parameters: normalizeDynamicParameters(effect, rawBackground.parameters)
             };
-          }
-          return {
-            type: "dynamic",
-            effect,
+          })()
+        : {
+            type: "gradient",
             from: validColor(rawBackground.from, fallbackFrom),
             to: validColor(rawBackground.to, fallbackTo),
-            angle: validNumber(rawBackground.angle, 0, 360, fallbackAngle),
-            speed: normalizeDynamicSpeed(effect, rawBackground.speed),
-            parameters: normalizeDynamicParameters(effect, rawBackground.parameters)
+            angle: validNumber(rawBackground.angle, 0, 360, fallbackAngle)
           };
-        })()
-      : {
-          type: "gradient",
-          from: validColor(rawBackground.from, fallbackFrom),
-          to: validColor(rawBackground.to, fallbackTo),
-          angle: validNumber(rawBackground.angle, 0, 360, fallbackAngle)
-        };
 
   const dynamicEffectProfiles: DynamicEffectProfiles = {};
   for (const [effectInput, rawProfile] of Object.entries(settingsRecord(settings.dynamicEffectProfiles))) {
@@ -294,9 +290,7 @@ export function normalizeSettings(input: unknown): SyncedSettings {
   const hoverStyle = features.hoverStyle;
   const themeMode = features.themeMode;
   return {
-    openTarget: settings.openTarget === "current-tab" || settings.openTarget === "new-tab"
-      ? settings.openTarget
-      : DEFAULT_SETTINGS.openTarget,
+    openTarget: settings.openTarget === "current-tab" || settings.openTarget === "new-tab" ? settings.openTarget : DEFAULT_SETTINGS.openTarget,
     background,
     dynamicEffectProfiles,
     foreground: {
@@ -306,22 +300,19 @@ export function normalizeSettings(input: unknown): SyncedSettings {
     layout: {
       rows: validInteger(layout.rows, 1, 10, DEFAULT_SETTINGS.layout.rows),
       columns: validInteger(layout.columns, 2, 10, DEFAULT_SETTINGS.layout.columns),
-      bookmarkAlignment: bookmarkAlignment === "left" || bookmarkAlignment === "center" || bookmarkAlignment === "right"
-        ? bookmarkAlignment
-        : DEFAULT_SETTINGS.layout.bookmarkAlignment
+      bookmarkAlignment:
+        bookmarkAlignment === "left" || bookmarkAlignment === "center" || bookmarkAlignment === "right"
+          ? bookmarkAlignment
+          : DEFAULT_SETTINGS.layout.bookmarkAlignment
     },
     clockPosition: validClockPosition(settings.clockPosition, DEFAULT_SETTINGS.clockPosition),
     features: {
       searchPosition: validClockPosition(features.searchPosition, DEFAULT_SETTINGS.features.searchPosition),
       searchIcon: typeof features.searchIcon === "boolean" ? features.searchIcon : DEFAULT_SETTINGS.features.searchIcon,
       searchText: validClockPosition(features.searchText, DEFAULT_SETTINGS.features.searchText),
-      bookmarkDetails: typeof features.bookmarkDetails === "boolean"
-        ? features.bookmarkDetails
-        : DEFAULT_SETTINGS.features.bookmarkDetails,
+      bookmarkDetails: typeof features.bookmarkDetails === "boolean" ? features.bookmarkDetails : DEFAULT_SETTINGS.features.bookmarkDetails,
       clockSeconds: typeof features.clockSeconds === "boolean" ? features.clockSeconds : DEFAULT_SETTINGS.features.clockSeconds,
-      hoverStyle: hoverStyle === "underline" || hoverStyle === "box" || hoverStyle === "block"
-        ? hoverStyle
-        : DEFAULT_SETTINGS.features.hoverStyle,
+      hoverStyle: hoverStyle === "underline" || hoverStyle === "box" || hoverStyle === "block" ? hoverStyle : DEFAULT_SETTINGS.features.hoverStyle,
       themeColor: validColor(features.themeColor, DEFAULT_SETTINGS.features.themeColor),
       themeMode: themeMode === "dark" || themeMode === "light" ? themeMode : DEFAULT_SETTINGS.features.themeMode
     }
@@ -343,9 +334,9 @@ function canonicalNote(note: SyncNote): SyncNote {
 }
 
 export function canonicalBookmarks(nodes: BookmarkItem[]): BookmarkItem[] {
-  return nodes.map((node) => node.url !== undefined
-    ? { title: node.title, url: node.url }
-    : { title: node.title, children: canonicalBookmarks(node.children ?? []) });
+  return nodes.map((node) =>
+    node.url !== undefined ? { title: node.title, url: node.url } : { title: node.title, children: canonicalBookmarks(node.children ?? []) }
+  );
 }
 
 export function canonicalSnapshot(snapshot: Snapshot): Snapshot {
@@ -359,12 +350,7 @@ export function canonicalSnapshot(snapshot: Snapshot): Snapshot {
   };
 }
 
-export function snapshotFrom(
-  bookmarks: BookmarkItem[],
-  settings: SyncedSettings,
-  notes: SyncNote[] = [],
-  updatedAt: string = eastEightTimestamp()
-): Snapshot {
+export function snapshotFrom(bookmarks: BookmarkItem[], settings: SyncedSettings, notes: SyncNote[] = [], updatedAt: string = eastEightTimestamp()): Snapshot {
   return canonicalSnapshot({
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     settingsVersion: SETTINGS_VERSION,

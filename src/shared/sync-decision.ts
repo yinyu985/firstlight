@@ -14,12 +14,11 @@ export function decideSyncWithRevision(
   localHash: string,
   remoteHash: string,
   baselineHash: string,
-  baselineRemoteUpdatedAt: string,
-  remoteUpdatedAt: string
+  _baselineRemoteUpdatedAt: string,
+  _remoteUpdatedAt: string
 ): SyncDecision {
-  if (remoteUpdatedAt === baselineRemoteUpdatedAt) {
-    return localHash === remoteHash ? "adopt" : "upload";
-  }
+  // Gist revisions are timestamps, not content identifiers. Two writes can share
+  // a revision; even then the three-way content comparison must protect remote edits.
   return decideSync(localHash, remoteHash, baselineHash);
 }
 

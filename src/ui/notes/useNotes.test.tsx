@@ -50,7 +50,15 @@ describe("useNotes", () => {
     root = createRoot(container);
     save = vi.fn<(notes: SyncNote[]) => void>();
     await act(async () => {
-      root.render(<Harness notes={initialNotes} onSave={save} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={initialNotes}
+          onSave={save}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
   });
 
@@ -68,16 +76,17 @@ describe("useNotes", () => {
 
     expect(current.notes.find((note) => note.id === "a")?.content).toBe("Edited alpha");
     expect(current.notes.find((note) => note.id === "b")?.content).toBe("Beta content");
-    expect(save).toHaveBeenLastCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: "a", content: "Edited alpha" }),
-      expect.objectContaining({ id: "b", content: "Beta content" })
-    ]));
+    expect(save).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "a", content: "Edited alpha" }), expect.objectContaining({ id: "b", content: "Beta content" })])
+    );
   });
 
   it("does not copy the previous note into a newly created note", () => {
     act(() => current.setDraftTitle("Edited alpha"));
     let createdId = "";
-    act(() => { createdId = current.createNote(); });
+    act(() => {
+      createdId = current.createNote();
+    });
 
     expect(current.notes.find((note) => note.id === "a")?.title).toBe("Edited alpha");
     expect(current.notes.find((note) => note.id === createdId)).toMatchObject({ title: "", content: "" });
@@ -93,9 +102,17 @@ describe("useNotes", () => {
   });
 
   it("accepts an externally restored version of the selected note", async () => {
-    const restored = initialNotes.map((note) => note.id === "a" ? { ...note, content: "Remote alpha" } : note);
+    const restored = initialNotes.map((note) => (note.id === "a" ? { ...note, content: "Remote alpha" } : note));
     await act(async () => {
-      root.render(<Harness notes={restored} onSave={save} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={restored}
+          onSave={save}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
 
     expect(current.selectedNoteId).toBe("a");
@@ -106,9 +123,7 @@ describe("useNotes", () => {
     act(() => current.setDraftContent("Last keystroke"));
     await act(async () => root.unmount());
 
-    expect(save).toHaveBeenLastCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: "a", content: "Last keystroke" })
-    ]));
+    expect(save).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "a", content: "Last keystroke" })]));
     root = createRoot(container);
   });
 
@@ -118,7 +133,17 @@ describe("useNotes", () => {
     root = createRoot(container);
 
     await act(async () => {
-      root.render(<StrictMode><Harness notes={initialNotes} onSave={save} report={(hook) => { current = hook; }} /></StrictMode>);
+      root.render(
+        <StrictMode>
+          <Harness
+            notes={initialNotes}
+            onSave={save}
+            report={(hook) => {
+              current = hook;
+            }}
+          />
+        </StrictMode>
+      );
     });
 
     expect(save).not.toHaveBeenCalled();
@@ -127,11 +152,21 @@ describe("useNotes", () => {
 
   it("does not let an earlier save echo overwrite newer typing", async () => {
     let resolveFirstSave: (() => void) | undefined;
-    const pendingSave = new Promise<void>((resolve) => { resolveFirstSave = resolve; });
+    const pendingSave = new Promise<void>((resolve) => {
+      resolveFirstSave = resolve;
+    });
     const delayedSave = vi.fn((_notes: SyncNote[]) => pendingSave);
 
     await act(async () => {
-      root.render(<Harness notes={initialNotes} onSave={delayedSave} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={initialNotes}
+          onSave={delayedSave}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
     act(() => current.setDraftContent("First edit"));
     await act(async () => vi.advanceTimersByTimeAsync(400));
@@ -140,25 +175,47 @@ describe("useNotes", () => {
 
     act(() => current.setDraftContent("Newer edit"));
     await act(async () => {
-      root.render(<Harness notes={firstPayload!} onSave={delayedSave} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={firstPayload!}
+          onSave={delayedSave}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
 
     expect(current.draftContent).toBe("Newer edit");
     resolveFirstSave?.();
     await act(async () => Promise.resolve());
     await act(async () => {
-      root.render(<Harness notes={structuredClone(firstPayload!)} onSave={delayedSave} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={structuredClone(firstPayload!)}
+          onSave={delayedSave}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
     expect(current.draftContent).toBe("Newer edit");
   });
 
   it("retries a failed note save without requiring another edit", async () => {
-    const retryingSave = vi.fn()
-      .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValue(undefined);
+    const retryingSave = vi.fn().mockRejectedValueOnce(new Error("temporary failure")).mockResolvedValue(undefined);
 
     await act(async () => {
-      root.render(<Harness notes={initialNotes} onSave={retryingSave} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={initialNotes}
+          onSave={retryingSave}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
     act(() => current.setDraftContent("Retry me"));
     await act(async () => vi.advanceTimersByTimeAsync(400));
@@ -167,15 +224,22 @@ describe("useNotes", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await act(async () => vi.advanceTimersByTimeAsync(400));
     expect(retryingSave).toHaveBeenCalledTimes(2);
-    expect(retryingSave).toHaveBeenLastCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: "a", content: "Retry me" })
-    ]));
+    expect(retryingSave).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "a", content: "Retry me" })]));
   });
 
   it("forces the restored remote notes into the editor even when the parent value returns to an earlier version", async () => {
     act(() => current.setDraftContent("Unsaved local"));
     await act(async () => {
-      root.render(<Harness notes={initialNotes} onSave={save} externalResetKey={1} report={(hook) => { current = hook; }} />);
+      root.render(
+        <Harness
+          notes={initialNotes}
+          onSave={save}
+          externalResetKey={1}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      );
     });
 
     expect(current.draftContent).toBe("Alpha content");
