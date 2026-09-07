@@ -9,7 +9,7 @@
   </head>
   <body>
     <h1>Firstlight 隐私政策</h1>
-    <p>更新日期：2026-09-06。适用于此仓库构建的 Firstlight Chrome 扩展及 Online 网页版。</p>
+    <p>更新日期：2026-09-07。适用于此仓库构建的 Firstlight Chrome 扩展及 Online 网页版。</p>
     <h2>处理哪些数据、用于什么</h2>
     <p>
       Firstlight 读取 Chrome 书签栏的名称、URL 和文件夹层级，处理你写入的 Notes、显示设置及 GitHub
@@ -23,7 +23,8 @@
     </p>
     <p>
       用户连接 GitHub 后，Token 直接发送到 api.github.com 或 gist.githubusercontent.com 用于鉴权。扩展将完整书签、Notes 和同步设置上传到用户账号下的 Secret
-      Gist；Token 不进入快照。Online 只读取 GitHub。Firstlight 没有用于接收 Token 或同步内容的自有后台。
+      Gist；只有 Notes 正文会先 gzip 压缩，再通过 Token 派生的 AES-256-GCM 密钥加密。笔记标题、ID、时间、书签和设置仍为明文。Token
+      和派生密钥不进入快照。所有设备与 Online 需使用同一个 Token；Online 只读取 GitHub。Firstlight 没有用于接收 Token 或同步内容的自有后台。
     </p>
     <p>
       GitHub 以及 Online 所在的托管服务商可能按各自政策记录请求元数据，例如 IP 和访问时间。用户打开书签后，该网页按自己的隐私政策处理访问数据；data:
@@ -42,8 +43,10 @@
     </p>
     <h2>安全边界与联系</h2>
     <p>
-      本地持久存储不承诺磁盘加密。Secret Gist 不提供端到端加密；持有链接的人可能访问内容。共享设备建议使用会话模式并在使用后断开。Token
-      在设置中按产品设计直接显示，分享截图前应自行移除。
+      本地持久存储及下载的原文不加密。仅有 Gist 链接不能解密新版 Notes 正文，但可以读取笔记标题、ID、时间、书签、设置和旧明文历史。Token 泄露会暴露正文；GitHub
+      鉴权会收到 Token，因此此方案不对 GitHub 保密。更换 Token
+      时，扩展临时保留迁移所需凭证，各自遵循会话/记住选择，验证切换成功后清除旧凭证与迁移记录；失败时暂停同步，需再次保存新 Token
+      继续后才能断开。旧密文历史仍需要旧 Token。共享设备建议使用会话模式并在使用后断开。Token 在设置中按产品设计直接显示，分享截图前应自行移除。
     </p>
     <p>隐私问题请通过扩展商店详情页中开发者提供的支持渠道联系维护者。不要发送 Token 或完整私人快照。</p>
     <p><a href="./help.html">返回使用帮助</a></p>

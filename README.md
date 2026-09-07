@@ -9,8 +9,6 @@ Firstlight 有两个运行端：
 
 产品规格见 [SPEC.md](./SPEC.md)。用户操作与 Token 权限见 [使用帮助](./public/help.html)，数据处理说明见 [隐私政策](./public/privacy.html)。发布前以质量门禁实际结果为准。
 
-本轮变更与保留设计见 [全面修复记录](./docs/audit-resolution.md)。
-
 ## 本地开发
 
 ```bash
@@ -47,7 +45,8 @@ npm run check
 ## 数据与同步
 
 - Chrome Bookmarks 是本地书签的唯一数据源。
-- Notes、显示设置和完整书签栏共同进入 `firstlight.json`。
+- Notes、显示设置和完整书签栏共同进入 `firstlight.json`。仅 Notes 正文使用原生 gzip + HKDF-SHA-256 / AES-256-GCM；标题、ID、时间在 `notes.items` 中可直接检查，书签和设置保持明文。跨设备及 Online 使用完全相同的 Gist token，无第二个密码，不兼容历史远端格式。
+- 换 token 请在仍保存旧 token 的扩展中直接保存新值；远端正文重加密和回读成功后才切换。失败时暂停同步，再次保存同一个新 token 继续。此方案不保护本地原文、旧明文历史或泄露的 token，也不向 GitHub 保密。
 - 本地变化采用 10 秒尾端防抖上传；上传前读取一次远端并依据语义哈希与同步基线判断冲突。
 - Notes 保存会保留尚未确认的本地输入并在临时存储失败后重试；选择远端快照时会先停止未完成的 Notes 写入，避免旧草稿覆盖恢复结果。
 - Gist 绑定失效时扩展会重新发现最新快照；Online 每次连接都重新发现 GitHub `updated_at` 最新的 Firstlight Gist。
