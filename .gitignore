@@ -1,3 +1,5 @@
+.history/
+firstlight-*.patch
 node_modules
 dist
 .vscode
