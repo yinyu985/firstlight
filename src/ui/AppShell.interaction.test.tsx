@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState } from "react";
+import { act, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 import { DEFAULT_SETTINGS, type SyncedSettings } from "../shared/model";
@@ -63,6 +63,9 @@ describe("AppShell interactions", () => {
   it("isolates Notes and supports creating and editing a note", async () => {
     mounted = await mountUi(<Harness />);
     await click(control("Open note panel"));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     await click(control("Create new note"));
     await input(control<HTMLInputElement>("Note title"), "A note");
     await input(control<HTMLTextAreaElement>("Note content"), "My content");

@@ -187,6 +187,14 @@ test("real extension diff restores remote data and uploads a reviewed local chan
     await page.goto(`chrome-extension://${new URL(worker.url()).host}/newtab.html`);
     await expect(page.locator(".app")).toBeVisible();
     await page.keyboard.press("Escape");
+    await page.evaluate(async () => {
+      const { state } = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      await chrome.runtime.sendMessage({
+        type: "SAVE_SETTINGS",
+        settings: { ...state.settings, features: { ...state.settings.features, themeMode: "light" } }
+      });
+    });
+    await expect(page.locator(".app.theme-light")).toBeVisible();
     await page.getByRole("button", { name: "Open settings" }).click();
     await page.getByRole("textbox", { name: "GitHub token" }).fill("firstlight-e2e-token");
     await page.getByRole("button", { name: "SAVE", exact: true }).click();
@@ -196,6 +204,8 @@ test("real extension diff restores remote data and uploads a reviewed local chan
       "https://gist.github.com/fixture-gist"
     );
     await expect(page.locator(".cm-mergeView")).toBeVisible();
+    await expect(page.locator(".cm-editor").first()).toHaveCSS("background-color", "rgb(247, 248, 245)");
+    await expect(page.locator(".diff-dialog")).toHaveCSS("background-color", "rgb(241, 242, 239)");
     await page.getByRole("button", { name: "USE REMOTE", exact: true }).click();
     await expect
       .poll(async () =>
@@ -223,6 +233,7 @@ test("real extension diff restores remote data and uploads a reviewed local chan
     await page.getByRole("button", { name: "Open settings" }).click();
     await page.getByRole("button", { name: "DIFF", exact: true }).click();
     await expect(page.locator(".cm-mergeView")).toBeVisible();
+    await expect(page.locator(".cm-editor").first()).toHaveCSS("background-color", "rgb(8, 13, 16)");
     await page.getByRole("button", { name: "USE LOCAL", exact: true }).click();
     await expect.poll(() => uploads).toBe(1);
     await expect

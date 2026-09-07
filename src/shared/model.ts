@@ -301,8 +301,8 @@ export function normalizeSettings(input: unknown): SyncedSettings {
       fontSize: validInteger(foreground.fontSize, 12, 24, DEFAULT_SETTINGS.foreground.fontSize)
     },
     layout: {
-      rows: validInteger(layout.rows, 1, 10, DEFAULT_SETTINGS.layout.rows),
-      columns: validInteger(layout.columns, 2, 10, DEFAULT_SETTINGS.layout.columns),
+      rows: validInteger(layout.rows, 1, 8, DEFAULT_SETTINGS.layout.rows),
+      columns: validInteger(layout.columns, 2, 8, DEFAULT_SETTINGS.layout.columns),
       bookmarkAlignment:
         bookmarkAlignment === "left" || bookmarkAlignment === "center" || bookmarkAlignment === "right"
           ? bookmarkAlignment

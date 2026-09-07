@@ -66,6 +66,7 @@ export function OnlineApp() {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [settingsError, setSettingsError] = useState<string>();
   const connectGeneration = useRef(0);
   const connectionAbort = useRef<AbortController | undefined>(undefined);
   const startupConnection = useRef(readOnlineToken());
@@ -140,9 +141,9 @@ export function OnlineApp() {
     if (!pending) return;
     if (writeStorage(SETTINGS_KEY, JSON.stringify(pending))) {
       if (pendingSettings.current === pending) pendingSettings.current = undefined;
-      setError(undefined);
+      setSettingsError(undefined);
     } else {
-      setError("Unable to save settings in this browser");
+      setSettingsError("Unable to save settings in this browser");
     }
   }, []);
 
@@ -204,7 +205,7 @@ export function OnlineApp() {
     <AppShell
       state={state}
       busy={busy}
-      error={error}
+      error={[error, settingsError].filter(Boolean).join("\n") || undefined}
       onOpenBookmark={openBookmark}
       onSaveSettings={saveSettings}
       onSaveToken={(token, remember) => void connect(token, remember)}

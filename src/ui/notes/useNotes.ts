@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { SyncNote } from "../../shared/model";
+import { canRetrySave } from "../../shared/saveError";
 import type { Note, NoteSortMode } from "./types";
 import { clearNotesState, loadNotesState, saveNotesSortMode, saveNotesState, type StoredNotesState } from "./storage";
 
@@ -189,7 +190,7 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
       setNotes(syncNotes);
       const currentSelection = selectedNoteIdRef.current;
       const nextSelection =
-        currentSelection && syncNotes.some((note) => note.id === currentSelection) ? currentSelection : getLatestNoteId(syncNotes, DEFAULT_SORT_MODE);
+        currentSelection && syncNotes.some((note) => note.id === currentSelection) ? currentSelection : getLatestNoteId(syncNotes, sortModeRef.current);
       selectedNoteIdRef.current = nextSelection;
       setSelectedNoteId(nextSelection);
       setIsReady(true);
@@ -257,9 +258,9 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
             dirtyRef.current = notesRef.current !== notes;
           }
         })
-        .catch(() => {
+        .catch((cause) => {
           inFlightVersionsRef.current.delete(notes);
-          if (persistencePausedRef.current) return;
+          if (persistencePausedRef.current || !canRetrySave(cause)) return;
           if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
           retryTimer.current = window.setTimeout(() => {
             retryTimer.current = null;

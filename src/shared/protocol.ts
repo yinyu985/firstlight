@@ -45,6 +45,7 @@ export interface ExtensionResponse {
   state?: AppState;
   patch?: import("./statePatch").StatePatch;
   error?: string;
+  retryable?: boolean;
 }
 
 export interface StoredState {

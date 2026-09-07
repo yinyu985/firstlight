@@ -247,7 +247,10 @@ test("Online sends a frame-ancestors policy and leaves optional backgrounds out 
   const response = await page.goto("/");
   expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
   await expect(page.locator(".app")).toBeVisible();
-  expect(scripts.some((url) => /\/(?:vendor-|NeuroNoise-)/.test(url))).toBe(false);
+  expect(scripts.some((url) => /\/(?:vendor-|NeuroNoise-|NotesApp-)/.test(url))).toBe(false);
+  await page.getByRole("button", { name: "Open note panel" }).click();
+  await expect(page.locator("#notes-app")).toBeVisible();
+  expect(scripts.some((url) => /\/NotesApp-/.test(url))).toBe(true);
 });
 
 test("data bookmarks execute in an opaque-origin top-level page without inheriting the app's restrictive CSP", async ({ page, context }) => {

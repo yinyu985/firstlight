@@ -4,6 +4,7 @@ import { act, StrictMode, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SyncNote } from "../../shared/model";
+import { SaveError } from "../../shared/saveError";
 import { useNotes, type NotesHook } from "./useNotes";
 
 const initialNotes: SyncNote[] = [
@@ -65,6 +66,7 @@ describe("useNotes", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    localStorage.clear();
     vi.useRealTimers();
   });
 
@@ -225,6 +227,56 @@ describe("useNotes", () => {
     await act(async () => vi.advanceTimersByTimeAsync(400));
     expect(retryingSave).toHaveBeenCalledTimes(2);
     expect(retryingSave).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "a", content: "Retry me" })]));
+  });
+
+  it("selects the first note in the saved created-desc ordering on open", async () => {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    localStorage.setItem("firstlight.notes.v1", JSON.stringify({ notes: [], sortMode: "created-desc", selectedNoteId: null }));
+    const notes = [
+      { ...initialNotes[0], createtime: "2026-08-11T10:00:00.000+08:00", updatetime: "2026-08-13T10:00:00.000+08:00" },
+      { ...initialNotes[1], createtime: "2026-08-12T10:00:00.000+08:00" }
+    ];
+    await act(async () =>
+      root.render(
+        <Harness
+          notes={notes}
+          onSave={save}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      )
+    );
+    expect(current.sortMode).toBe("created-desc");
+    expect(current.selectedNoteId).toBe("b");
+    expect(current.filteredNotes[0].id).toBe("b");
+  });
+
+  it("does not retry permanent save errors until the user changes the draft", async () => {
+    const rejected = vi.fn().mockRejectedValue(new SaveError("Invalid Notes", false));
+    await act(async () =>
+      root.render(
+        <Harness
+          notes={initialNotes}
+          onSave={rejected}
+          report={(hook) => {
+            current = hook;
+          }}
+        />
+      )
+    );
+    act(() => current.setDraftContent("Rejected draft"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(rejected).toHaveBeenCalledTimes(1);
+    expect(current.draftContent).toBe("Rejected draft");
+    act(() => current.setDraftContent("Corrected draft"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(rejected).toHaveBeenCalledTimes(2);
   });
 
   it("forces the restored remote notes into the editor even when the parent value returns to an earlier version", async () => {

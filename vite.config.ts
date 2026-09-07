@@ -1,6 +1,7 @@
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import packageJson from "./package.json";
 import { build as buildScript } from "esbuild";
@@ -34,13 +35,24 @@ const manifest = {
     "128": "icons/firstlight-128.png"
   },
   content_security_policy: {
-    extension_pages: "script-src 'self'; object-src 'self'; connect-src https://api.github.com https://gist.githubusercontent.com"
+    extension_pages:
+      "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src https://api.github.com https://gist.githubusercontent.com"
   }
 };
 
 export default defineConfig(({ mode }) => {
   const extension = mode === "extension";
-  const plugins: PluginOption[] = [react()];
+  const plugins: PluginOption[] = [
+    react(),
+    {
+      name: "firstlight-dev-csp",
+      apply: "serve",
+      transformIndexHtml(html, context) {
+        // Only the development server needs HMR; preview and release keep their CSP.
+        return context.server ? html.replace(/<meta\s+http-equiv="Content-Security-Policy"[^>]*>/gi, "") : html;
+      }
+    }
+  ];
   if (!extension) {
     const rendererScript = async () =>
       (
@@ -83,6 +95,9 @@ export default defineConfig(({ mode }) => {
   if (extension)
     plugins.push({
       name: "firstlight-manifest",
+      async writeBundle(options) {
+        await rm(resolve(options.dir!, "data-renderer.html"), { force: true });
+      },
       generateBundle() {
         this.emitFile({
           type: "asset",

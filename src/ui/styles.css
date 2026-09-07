@@ -1818,6 +1818,43 @@ a:focus-visible,
   color: #9aaea9;
   background: rgba(255, 255, 255, 0.04);
 }
+.theme-light .diff-dialog,
+.theme-light .loading-dialog {
+  color: #242825;
+  background: #f1f2ef;
+  box-shadow:
+    0 0 0 1px #c8cbc7,
+    0 28px 90px rgba(0, 0, 0, 0.18);
+}
+.theme-light .diff-header,
+.theme-light .diff-actions {
+  border-color: #d8dad7;
+}
+.theme-light .diff-header .icon-button,
+.theme-light .diff-labels,
+.theme-light .diff-summary-notice {
+  color: #626763;
+}
+.theme-light .diff-labels {
+  background: #eef0ed;
+}
+.theme-light .merge-host,
+.theme-light .merge-host .cm-mergeView {
+  color: #242825;
+  background: #f7f8f5;
+  color-scheme: light;
+}
+.theme-light .diff-dialog .button.primary {
+  color: #f4f5f2;
+  background: #202421;
+}
+.theme-light .diff-dialog .button.secondary {
+  color: #303532;
+  background: #dfe2de;
+}
+.theme-light .diff-gist-link {
+  color: #176854;
+}
 .boot-screen {
   width: 100%;
   height: 100%;

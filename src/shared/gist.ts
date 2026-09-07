@@ -123,15 +123,58 @@ export function normalizeGitHubToken(input: string): string {
   return token;
 }
 
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseGist(value: unknown): GistResponse {
+  if (
+    !record(value) ||
+    typeof value.id !== "string" ||
+    !value.id ||
+    typeof value.public !== "boolean" ||
+    typeof value.html_url !== "string" ||
+    typeof value.updated_at !== "string" ||
+    !Number.isFinite(Date.parse(value.updated_at)) ||
+    !record(value.files)
+  ) {
+    throw new GitHubError("GitHub returned invalid Gist metadata");
+  }
+  let link: URL;
+  try {
+    link = new URL(value.html_url);
+  } catch {
+    throw new GitHubError("GitHub returned an invalid Gist link");
+  }
+  if (link.origin !== "https://gist.github.com" || link.username || link.password) throw new GitHubError("GitHub returned an unsupported Gist link");
+  for (const file of Object.values(value.files)) {
+    if (
+      !record(file) ||
+      (file.content !== undefined && typeof file.content !== "string") ||
+      (file.raw_url !== undefined && typeof file.raw_url !== "string") ||
+      (file.truncated !== undefined && typeof file.truncated !== "boolean")
+    ) {
+      throw new GitHubError("GitHub returned invalid Gist file metadata");
+    }
+  }
+  return value as unknown as GistResponse;
+}
+
+export const GITHUB_OPERATION_TIMEOUT_MS = 60_000;
+
 export class GistClient {
   private readonly token: string;
+  private readonly signal: AbortSignal;
   private readonly verifiedReads = new WeakMap<RemoteSnapshot, string>();
 
-  constructor(
-    token: string,
-    private readonly signal?: AbortSignal
-  ) {
+  constructor(token: string, signal?: AbortSignal) {
     this.token = normalizeGitHubToken(token);
+    const deadline = AbortSignal.timeout(GITHUB_OPERATION_TIMEOUT_MS);
+    this.signal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  }
+
+  private checkAbort(): void {
+    if (this.signal.aborted) throw transportError(this.signal.reason);
   }
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -140,7 +183,7 @@ export class GistClient {
     const attempts = retryableMethod ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        this.signal?.throwIfAborted();
+        this.checkAbort();
         const timeout = AbortSignal.timeout(15_000);
         const response = await fetch(url, {
           ...init,
@@ -157,16 +200,21 @@ export class GistClient {
         if (!response.ok) {
           let detail = "";
           try {
-            detail = (JSON.parse(text) as { message?: string }).message ?? "";
+            const parsed: unknown = JSON.parse(text);
+            detail = record(parsed) && typeof parsed.message === "string" ? parsed.message : "";
           } catch {
             /* optional API detail */
           }
           if (method === "GET" && response.status >= 500 && attempt + 1 < attempts) continue;
-          throw httpError(response, detail);
+          throw httpError(response, this.token ? detail.replaceAll(this.token, "[redacted]") : detail);
         }
-        return JSON.parse(text) as T;
+        try {
+          return JSON.parse(text) as T;
+        } catch {
+          throw new GitHubError("GitHub returned invalid JSON");
+        }
       } catch (error) {
-        this.signal?.throwIfAborted();
+        this.checkAbort();
         const failure = transportError(error);
         if (retryableMethod && attempt + 1 < attempts && failure instanceof GitHubError && failure.kind) continue;
         throw failure;
@@ -182,7 +230,7 @@ export class GistClient {
   }
 
   private async getSecretGist(gistId: string): Promise<GistResponse> {
-    const gist = await this.request<GistResponse>(`https://api.github.com/gists/${encodeURIComponent(gistId)}`);
+    const gist = parseGist(await this.request<unknown>(`https://api.github.com/gists/${encodeURIComponent(gistId)}`));
     this.assertSecretGist(gist);
     return gist;
   }
@@ -193,7 +241,7 @@ export class GistClient {
       throw new GitHubError("GitHub returned an unsupported snapshot URL");
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        this.signal?.throwIfAborted();
+        this.checkAbort();
         const timeout = AbortSignal.timeout(15_000);
         const response = await fetch(rawUrl, {
           cache: "no-store",
@@ -207,7 +255,7 @@ export class GistClient {
         }
         return text;
       } catch (error) {
-        this.signal?.throwIfAborted();
+        this.checkAbort();
         const failure = transportError(error);
         if (attempt === 0 && failure instanceof GitHubError && failure.kind) continue;
         throw failure;
@@ -219,7 +267,10 @@ export class GistClient {
   async discover(): Promise<Array<Pick<RemoteSnapshot, "gistId" | "htmlUrl" | "updatedAt">>> {
     const discovered: Array<Pick<RemoteSnapshot, "gistId" | "htmlUrl" | "updatedAt">> = [];
     for (let page = 1; ; page += 1) {
-      const gists = await this.request<GistResponse[]>(`https://api.github.com/gists?per_page=100&page=${page}`);
+      this.checkAbort();
+      const response = await this.request<unknown>(`https://api.github.com/gists?per_page=100&page=${page}`);
+      if (!Array.isArray(response) || response.length > 100) throw new GitHubError("GitHub returned an invalid Gist list");
+      const gists = response.map(parseGist);
       discovered.push(
         ...gists
           .filter((gist) => gist.public === false && gist.files[SNAPSHOT_FILE_NAME] && gist.description === GIST_DESCRIPTION)
@@ -252,6 +303,7 @@ export class GistClient {
     try {
       decoded = await decodeGistSnapshot(content, decryptionToken, this.signal);
     } catch (error) {
+      this.checkAbort();
       if (!allowPlaintextNotes || !(error instanceof UnsupportedNotesFormatError)) throw error;
       decoded = parseSnapshotWithDiagnostics(content);
     }
@@ -268,8 +320,9 @@ export class GistClient {
   /** Requests use the new credential even when the old token has been revoked. */
   async rekey(gistId: string, oldToken?: string, beforeWrite?: () => Promise<void>): Promise<RemoteSnapshot> {
     const gist = await this.getSecretGist(gistId);
-    const user = await this.request<{ id: number }>("https://api.github.com/user");
-    if (!Number.isSafeInteger(user.id) || user.id !== gist.owner?.id) throw new GitHubError("Token migration is only allowed for your own Gist");
+    const user = await this.request<unknown>("https://api.github.com/user");
+    if (!record(user) || !Number.isSafeInteger(user.id) || user.id !== gist.owner?.id)
+      throw new GitHubError("Token migration is only allowed for your own Gist");
     try {
       // A previous PATCH may have succeeded before its acknowledgement or local commit failed.
       return await this.decodeRemote(gist, this.token);
@@ -305,7 +358,10 @@ export class GistClient {
 
   private async write(gistId: string | undefined, snapshot: Snapshot): Promise<RemoteSnapshot> {
     const canonical = validateSnapshot(snapshot);
-    const content = await encodeGistSnapshot(canonical, this.token, this.signal);
+    const content = await encodeGistSnapshot(canonical, this.token, this.signal).catch((error: unknown) => {
+      this.checkAbort();
+      throw error;
+    });
     const expectedHash = await snapshotHash(canonical);
     const body: {
       description: string;
@@ -318,11 +374,13 @@ export class GistClient {
     if (!gistId) body.public = false;
     let gist: GistResponse;
     try {
-      gist = await this.request<GistResponse>(gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists", {
-        method: gistId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
+      gist = parseGist(
+        await this.request<unknown>(gistId ? `https://api.github.com/gists/${encodeURIComponent(gistId)}` : "https://api.github.com/gists", {
+          method: gistId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+      );
     } catch (error) {
       if (!gistId && error instanceof GitHubError && error.kind) {
         const recovered = await this.findSnapshotByHash(expectedHash);

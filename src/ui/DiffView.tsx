@@ -3,13 +3,14 @@ import { json } from "@codemirror/lang-json";
 import { MergeView } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
 import { X } from "lucide-react";
-import type { DiffPayload } from "../shared/model";
+import type { DiffPayload, ThemeMode } from "../shared/model";
 import { downloadSnapshot, prepareDiffDocuments } from "./diffDocuments";
 import { scrollbarMetrics, type ScrollbarMetrics } from "./scrollbar";
 import { focusableElements } from "./focus";
 
 interface Props {
   diff: DiffPayload;
+  themeMode?: ThemeMode;
   busy?: boolean;
   onClose: () => void;
   onUseLeft: () => void;
@@ -19,41 +20,29 @@ interface Props {
 const DIFF_SCROLLBAR_INSET = 2;
 const DIFF_SCROLLBAR_MAX_LENGTH = 20;
 
-const diffDarkTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      color: "#dce7e3",
-      backgroundColor: "#080d10"
-    },
-    ".cm-scroller": {
-      backgroundColor: "#080d10"
-    },
-    ".cm-content": {
-      caretColor: "#74d8c1"
-    },
-    ".cm-line": {
-      padding: "0 9px"
-    },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "#74d8c1"
-    },
-    ".cm-gutters": {
-      color: "#65746f",
-      backgroundColor: "#0b1216",
-      border: "none"
-    },
-    ".cm-activeLine, .cm-activeLineGutter": {
-      backgroundColor: "rgba(116, 216, 193, .045)"
-    },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "rgba(116, 216, 193, .18)"
-    }
-  },
-  { dark: true }
-);
+const diffColors = {
+  dark: { text: "#dce7e3", background: "#080d10", muted: "#65746f", gutter: "#0b1216", accent: "#74d8c1", selection: "rgba(116,216,193,.18)" },
+  light: { text: "#242825", background: "#f7f8f5", muted: "#626763", gutter: "#eef0ed", accent: "#176854", selection: "rgba(23,104,84,.16)" }
+};
 
-export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }: Props) {
+function diffTheme(mode: ThemeMode) {
+  const colors = diffColors[mode];
+  return EditorView.theme(
+    {
+      "&": { height: "100%", color: colors.text, backgroundColor: colors.background },
+      ".cm-scroller": { backgroundColor: colors.background },
+      ".cm-content": { caretColor: colors.accent },
+      ".cm-line": { padding: "0 9px" },
+      ".cm-cursor, .cm-dropCursor": { borderLeftColor: colors.accent },
+      ".cm-gutters": { color: colors.muted, backgroundColor: colors.gutter, border: "none" },
+      ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: colors.gutter },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: colors.selection }
+    },
+    { dark: mode === "dark" }
+  );
+}
+
+export function DiffView({ diff, themeMode = "dark", busy = false, onClose, onUseLeft, onUseRight }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const dialog = useRef<HTMLElement>(null);
@@ -115,9 +104,10 @@ export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }:
 
   useEffect(() => {
     if (!host.current || !documents) return;
+    const theme = diffTheme(themeMode);
     const view = new MergeView({
-      a: { doc: documents.left, extensions: [json(), EditorView.editable.of(false), EditorView.lineWrapping, diffDarkTheme] },
-      b: { doc: documents.right, extensions: [json(), EditorView.editable.of(false), EditorView.lineWrapping, diffDarkTheme] },
+      a: { doc: documents.left, extensions: [json(), EditorView.editable.of(false), EditorView.lineWrapping, theme] },
+      b: { doc: documents.right, extensions: [json(), EditorView.editable.of(false), EditorView.lineWrapping, theme] },
       parent: host.current,
       collapseUnchanged: { margin: 3, minSize: 8 }
     });
@@ -137,7 +127,7 @@ export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }:
       view.destroy();
       scrollerRef.current = null;
     };
-  }, [documents]);
+  }, [documents, themeMode]);
 
   const dragScrollbar = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = scrollbarDragRef.current;

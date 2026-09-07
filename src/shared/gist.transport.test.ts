@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GistClient, GitHubError, isRetryableGitHubError, readBoundedText } from "./gist";
+import { GistClient, GitHubError, GITHUB_OPERATION_TIMEOUT_MS, isRetryableGitHubError, readBoundedText } from "./gist";
 import { DEFAULT_SETTINGS, GIST_DESCRIPTION, snapshotFrom } from "./model";
 import { encodeGistSnapshot } from "./notesEnvelope";
+import * as notesEnvelope from "./notesEnvelope";
 
 afterEach(() => vi.restoreAllMocks());
 const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
@@ -24,6 +25,63 @@ const interrupted = () =>
   );
 
 describe("GitHub transport failure boundaries", () => {
+  it.each([
+    { value: null },
+    { value: { message: "unexpected object" } },
+    { value: [null] },
+    { value: [{ ...gist, files: null }] },
+    { value: [{ ...gist, updated_at: "not-a-date" }] },
+    { value: [{ ...gist, html_url: "https://elsewhere.test/gist" }] },
+    { value: [{ ...gist, files: { "firstlight.json": { content: 123 } } }] }
+  ])("rejects malformed discovery responses without writing or exposing their contents", async ({ value }) => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(value));
+    await expect(new GistClient("test-token").discover()).rejects.toBeInstanceOf(GitHubError);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("redacts the current token from GitHub error details", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ message: "Invalid credential: test-token" }), { status: 401 }));
+    await expect(new GistClient("test-token").discover()).rejects.toThrow("Invalid credential: [redacted]");
+  });
+  it("reports invalid JSON rather than a raw parsing error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Private unexpected response"));
+    await expect(new GistClient("test-token").discover()).rejects.toThrow("GitHub returned invalid JSON");
+  });
+  it("applies an overall deadline across discovery pages and marks expiry as retryable", async () => {
+    const deadline = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((duration) => (duration === GITHUB_OPERATION_TIMEOUT_MS ? deadline.signal : new AbortController().signal));
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      expect(init?.signal?.aborted).toBe(false);
+      deadline.abort(new DOMException("Operation timed out", "TimeoutError"));
+      expect(init?.signal?.aborted).toBe(true);
+      return json(Array.from({ length: 100 }, () => gist));
+    });
+    const error = await new GistClient("test-token").discover().catch((cause: unknown) => cause);
+    expect(timeout).toHaveBeenCalledWith(60_000);
+    expect(error).toMatchObject({ kind: "timeout" });
+    expect(isRetryableGitHubError(error)).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("keeps deadline expiry retryable if it interrupts Notes encoding before upload", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    vi.spyOn(notesEnvelope, "encodeGistSnapshot").mockImplementation(async () => {
+      deadline.abort(new DOMException("Operation timed out", "TimeoutError"));
+      throw deadline.signal.reason;
+    });
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const error = await new GistClient("test-token").create(snapshot).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ kind: "timeout" });
+    expect(isRetryableGitHubError(error)).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("handles a non-string API error message without retrying a permanent HTTP failure", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ message: { unexpected: true } }), { status: 403 }));
+    await expect(new GistClient("test-token").discover()).rejects.toMatchObject({ status: 403, message: "GitHub request failed (403)" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("independently reads after a matching PATCH response", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(gist));
     await new GistClient("test-token").update("a", snapshot);

@@ -239,6 +239,79 @@ afterEach(async () => {
 });
 
 describe("extension background integration", () => {
+  it.each(["SAVE_SETTINGS", "SAVE_NOTES"] as const)("keeps committed data intact when %s fails, including the subsequent error-status write", async (type) => {
+    const before = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(before));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    const notes = [{ id: "a", name: "", content: "Uncommitted", createtime: LOCAL_TIME, updatetime: LOCAL_TIME }];
+    mock.storageSet.mockRejectedValueOnce(new Error("Temporary write failure"));
+    const request: ExtensionRequest =
+      type === "SAVE_NOTES" ? { type, notes } : { type, settings: { ...DEFAULT_SETTINGS, foreground: { ...DEFAULT_SETTINGS.foreground, fontSize: 19 } } };
+    const response = await sendRequest(mock.messageListeners[0], request);
+    expect(response).toMatchObject({ ok: false, retryable: true });
+    expect(response.state?.notes).toEqual([]);
+    expect(response.state?.settings).toEqual(before.config);
+    expect(mock.getStored().notes).toEqual([]);
+    expect(mock.getStored().settings).toEqual(before.config);
+    const retry = await sendRequest(mock.messageListeners[0], request);
+    expect(retry.ok).toBe(true);
+    if (type === "SAVE_NOTES") expect(mock.getStored().notes).toEqual(notes);
+    else expect(mock.getStored().settings?.foreground.fontSize).toBe(19);
+  });
+
+  it("marks invalid Notes as non-retryable without replacing persisted Notes", async () => {
+    const mock = chromeMock({ setupSeen: true, notes: [], settings: DEFAULT_SETTINGS });
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "SAVE_NOTES", notes: [{ id: "bad" }] as never });
+    expect(response).toMatchObject({ ok: false, retryable: false });
+    expect(mock.getStored().notes).toEqual([]);
+  });
+
+  it("restores changed Notes without deleting and recreating unchanged bookmarks", async () => {
+    const before = snapshotFrom([{ title: "Keep ID", url: "https://keep.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const notes = [{ id: "a", name: "Remote", content: "Updated", createtime: LOCAL_TIME, updatetime: LOCAL_TIME }];
+    const target = snapshotFrom(before.bookmarks, DEFAULT_SETTINGS, notes, LOCAL_TIME);
+    const mock = chromeMock(await connectedState(before), before.bookmarks);
+    gistMock.read.mockResolvedValue(remote(target));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const comparison = await sendRequest(mock.messageListeners[0], { type: "COMPARE_REMOTE" });
+    const result = await sendRequest(mock.messageListeners[0], { type: "USE_REMOTE", diffId: comparison.state!.diff!.id });
+    expect(result.ok).toBe(true);
+    expect(mock.getStored().notes).toEqual(notes);
+    expect(mock.api.bookmarks.remove).not.toHaveBeenCalled();
+    expect(mock.api.bookmarks.removeTree).not.toHaveBeenCalled();
+    expect(mock.bookmarksCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps local Notes and warns when bookmarks plus Notes exceed the upload limit", async () => {
+    const bookmarks = [{ title: "Large bookmark", url: "data:text/plain," + "x".repeat(6 * 1024 * 1024) }];
+    const before = snapshotFrom(bookmarks, DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(before), bookmarks);
+    gistMock.read.mockResolvedValue(remote(snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME)));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "COMPARE_REMOTE" });
+    const notes = [{ id: "a", name: "Large note", content: "y".repeat(5 * 1024 * 1024), createtime: LOCAL_TIME, updatetime: LOCAL_TIME }];
+    const result = await sendRequest(mock.messageListeners[0], { type: "SAVE_NOTES", notes });
+    expect(result.ok).toBe(true);
+    expect(mock.getStored().notes).toEqual(notes);
+    expect(result.state?.toast?.message).toContain("Saved locally");
+    expect(mock.getStored().pendingUpload).toBeUndefined();
+    expect(gistMock.update).not.toHaveBeenCalled();
+    // Do not start deleting bookmarks if the local recovery point would be invalid.
+    const restore = await sendRequest(mock.messageListeners[0], { type: "USE_REMOTE", diffId: result.state!.diff!.id });
+    expect(restore.ok).toBe(false);
+    expect(mock.getStored().restoreJournal).toBeUndefined();
+    expect(mock.getStored().notes).toEqual(notes);
+    expect(mock.api.bookmarks.remove).not.toHaveBeenCalled();
+    expect(mock.api.bookmarks.removeTree).not.toHaveBeenCalled();
+    expect(mock.bookmarksCreate).not.toHaveBeenCalled();
+  });
+
   it("does not replace an existing credential when the new token fails authentication", async () => {
     const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
     const state = await connectedState(local);

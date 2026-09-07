@@ -1,6 +1,7 @@
 import { GistClient, GitHubError, isRetryableGitHubError, normalizeGitHubToken, type RemoteSnapshot } from "../shared/gist";
 import {
   DEFAULT_SETTINGS,
+  MAX_SNAPSHOT_BYTES,
   SETTINGS_VERSION,
   type BookmarkItem,
   type DiffPayload,
@@ -16,11 +17,22 @@ import {
 } from "../shared/model";
 import type { AppState, ExtensionRequest, ExtensionResponse, StoredState } from "../shared/protocol";
 import { parseExtensionRequest } from "../shared/requestValidation";
-import { inspectSettings, settingsRepairMessage, sha256, snapshotHash, validateNotes, validateSnapshot } from "../shared/snapshot";
+import {
+  inspectSettings,
+  settingsRepairMessage,
+  sha256,
+  snapshotBytes,
+  snapshotHash,
+  SnapshotValidationError,
+  validateNotes,
+  validateSnapshot
+} from "../shared/snapshot";
 import { canAutoUpload, decideSyncWithRevision } from "../shared/sync-decision";
 import { StateRepository, StorageCommitError } from "./stateRepository";
 import { statePatch } from "../shared/statePatch";
 import { NotesDecryptionError, UnsupportedNotesFormatError } from "../shared/notesEnvelope";
+import { findBookmarkBar } from "./bookmarkBar";
+import { canRetrySave } from "../shared/saveError";
 
 const repository = new StateRepository(chrome.storage.local, chrome.storage.session);
 const UPLOAD_ALARM = "firstlight-pending-upload";
@@ -116,17 +128,9 @@ function sanitizeNode(node: chrome.bookmarks.BookmarkTreeNode): BookmarkItem {
 
 async function readBookmarks(): Promise<BookmarkItem[]> {
   const tree = await chrome.bookmarks.getTree();
-  const bar = tree[0]?.children?.[0];
-  if (!bar) throw new Error("Unable to read the Chrome bookmarks bar");
+  const bar = findBookmarkBar(tree);
   const next = (bar.children ?? []).map(sanitizeNode);
   return JSON.stringify(next) === JSON.stringify(bookmarks) ? bookmarks : next;
-}
-
-async function getBookmarkBarId(): Promise<string> {
-  const tree = await chrome.bookmarks.getTree();
-  const bar = tree[0]?.children?.[0];
-  if (!bar) throw new Error("Unable to locate the Chrome bookmarks bar");
-  return bar.id;
 }
 
 async function clearFolder(parentId: string): Promise<void> {
@@ -149,9 +153,12 @@ async function createNodes(parentId: string, nodes: BookmarkItem[]): Promise<voi
 }
 
 async function overwriteBookmarks(nodes: BookmarkItem[]): Promise<void> {
-  const barId = await getBookmarkBarId();
-  await clearFolder(barId);
-  await createNodes(barId, nodes);
+  const bar = findBookmarkBar(await chrome.bookmarks.getTree());
+  // Always read Chrome here: during rollback the in-memory tree may still be
+  // the original tree even though Chrome was only partially rebuilt.
+  if (JSON.stringify((bar.children ?? []).map(sanitizeNode)) === JSON.stringify(nodes)) return;
+  await clearFolder(bar.id);
+  await createNodes(bar.id, nodes);
 }
 
 function currentSettings(): SyncedSettings {
@@ -332,7 +339,8 @@ async function restoreSnapshot(target: Snapshot, reason: RecoveryReason, remote:
   let mutationStarted = false;
   try {
     bookmarks = await readBookmarks();
-    before = currentSnapshot();
+    // A recovery point must itself pass the checks used after a Worker restart.
+    before = validateSnapshot(currentSnapshot());
     await prepareRestore(before, target, reason);
     mutationStarted = true;
     await overwriteAndVerifySnapshot(target);
@@ -568,6 +576,8 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
   assertRestoreComplete();
   bookmarks = await readBookmarks();
   let local = validateSnapshot(currentSnapshot());
+  // Reuse only this operation's immutable snapshot hash, never a cross-operation cache.
+  let localHash = await snapshotHash(local);
   try {
     const client = await connectedClient();
     await setStatus({ phase: "uploading", message: memory.gistId ? "Uploading…" : "Creating remote snapshot…", gistId: memory.gistId });
@@ -582,18 +592,20 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
     const deferred = await queueLocal(async () => {
       bookmarks = await readBookmarks();
       const latest = validateSnapshot(currentSnapshot());
-      if ((await snapshotHash(latest)) === (await snapshotHash(local))) return false;
+      const latestHash = await snapshotHash(latest);
+      if (latestHash === localHash) return false;
       if (!force) {
         await setStatus({ phase: "local-only", message: "Waiting for local edits to finish", gistId: memory.gistId });
         return true;
       }
       local = latest;
+      localHash = latestHash;
       return false;
     });
     if (deferred) return;
+    const remoteHash = await snapshotHash(remote.snapshot);
 
     if (reviewed) {
-      const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
       if (remote.gistId !== reviewed.gistId || localHash !== reviewed.leftHash || remoteHash !== reviewed.rightHash) {
         cancelScheduledUpload(true);
         memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
@@ -609,7 +621,6 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
     }
 
     if (memory.baseline && !force) {
-      const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
       const decision = decideSyncWithRevision(localHash, remoteHash, memory.baseline.localHash, memory.baseline.remoteUpdatedAt, remote.updatedAt);
       if (decision === "conflict" || decision === "restore") {
         cancelScheduledUpload(true);
@@ -623,7 +634,6 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
         return;
       }
     } else if (!memory.baseline && memory.gistId && !force) {
-      const [localHash, remoteHash] = await Promise.all([snapshotHash(local), snapshotHash(remote.snapshot)]);
       if (localHash !== remoteHash) {
         cancelScheduledUpload(true);
         memory.pendingDiff = remoteDiff(local, remote, localHash, remoteHash);
@@ -634,9 +644,8 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
     }
 
     remote = await client.update(remote.gistId, local, remote);
-    const remoteHash = await snapshotHash(remote.snapshot);
-    const localHash = await snapshotHash(local);
-    if (remoteHash !== localHash) throw new Error("Remote verification failed after upload");
+    const verifiedRemoteHash = await snapshotHash(remote.snapshot);
+    if (verifiedRemoteHash !== localHash) throw new Error("Remote verification failed after upload");
     await establishBaseline(local, remote);
     memory.sync = { ...memory.sync!, message: "Uploaded to remote" };
     await publishToast("Uploaded to remote");
@@ -1087,6 +1096,43 @@ function ensureInitialized(): Promise<void> {
   return initializing;
 }
 
+async function saveLocalData(patch: Pick<StoredState, "notes" | "settings">): Promise<void> {
+  const localUpdatedAt = eastEightTimestamp();
+  const local = snapshotFrom(bookmarks, patch.settings ?? currentSettings(), patch.notes ?? memory.notes ?? [], localUpdatedAt);
+  const next: Partial<StoredState> = {
+    ...patch,
+    localUpdatedAt,
+    pendingUpload:
+      !memory.pendingDiff && !memory.restoreJournal && canAutoUpload(memory.syncEnabled, memory.token, memory.gistId, restoring)
+        ? { dueAt: Date.now() + UPLOAD_DEBOUNCE_MS, attempts: 0 }
+        : undefined
+  };
+  const diff = memory.pendingDiff;
+  if (diff) {
+    const leftHash = await snapshotHash(local);
+    if (leftHash !== diff.leftHash) {
+      next.pendingDiff = remoteDiff(local, { gistId: diff.gistId, updatedAt: diff.remoteUpdatedAt, snapshot: diff.right }, leftHash, diff.rightHash);
+      next.sync = {
+        phase: "conflict",
+        message: "Local data changed. Review the updated comparison.",
+        gistId: diff.gistId,
+        remoteUpdatedAt: diff.remoteUpdatedAt
+      };
+    }
+  }
+  if (snapshotBytes(local) > MAX_SNAPSHOT_BYTES) {
+    const message = "Saved locally. Bookmarks and Notes together exceed the 10 MiB upload limit; reduce their size before syncing.";
+    next.pendingUpload = undefined;
+    if (!diff) next.sync = { phase: memory.token ? "error" : "local-only", message, gistId: memory.gistId };
+    next.toast = { id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 };
+  }
+  // Neither a failed write nor its error-reporting write may publish this draft.
+  await commitMemory(next);
+  cancelScheduledUpload();
+  broadcast();
+  armPendingUpload();
+}
+
 async function handle(request: ExtensionRequest): Promise<AppState> {
   await ensureInitialized();
   await ensurePendingDiffReady();
@@ -1094,26 +1140,10 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
     case "GET_STATE":
       break;
     case "SAVE_SETTINGS":
-      memory.settings = settingsFromSnapshot(validateSnapshot(snapshotFrom([], request.settings, [])));
-      memory.localUpdatedAt = touchLocalUpdatedAt();
-      await refreshPendingDiffLeft();
-      scheduleUpload();
-      await saveMemory();
-      broadcast();
-      armPendingUpload();
+      await saveLocalData({ settings: settingsFromSnapshot(validateSnapshot(snapshotFrom([], request.settings, []))) });
       break;
     case "SAVE_NOTES":
-      memory.notes = validateSnapshot(snapshotFrom([], currentSettings(), request.notes)).notes.map((note) => ({
-        ...note,
-        createtime: note.createtime,
-        updatetime: note.updatetime
-      }));
-      memory.localUpdatedAt = touchLocalUpdatedAt();
-      await refreshPendingDiffLeft();
-      scheduleUpload();
-      await saveMemory();
-      broadcast();
-      armPendingUpload();
+      await saveLocalData({ notes: validateSnapshot(snapshotFrom([], currentSettings(), request.notes)).notes });
       break;
     case "SAVE_TOKEN":
       await saveToken(request.token, request.rememberToken ?? false);
@@ -1148,9 +1178,12 @@ async function handle(request: ExtensionRequest): Promise<AppState> {
 chrome.runtime.onMessage.addListener((rawRequest: unknown, _sender, sendResponse: (response: ExtensionResponse) => void) => {
   let request: ExtensionRequest;
   try {
+    if (_sender.id && _sender.id !== chrome.runtime.id) throw new Error("Unsupported message sender");
     request = parseExtensionRequest(rawRequest);
+    if (restoring && (request.type === "SAVE_NOTES" || request.type === "SAVE_SETTINGS"))
+      throw new Error("Wait for the current restore to finish before editing.");
   } catch (error) {
-    sendResponse({ ok: false, state: appState(), error: errorMessage(error) });
+    sendResponse({ ok: false, error: errorMessage(error), retryable: false });
     return false;
   }
   if (request.type === "GET_STATE") {
@@ -1187,7 +1220,10 @@ chrome.runtime.onMessage.addListener((rawRequest: unknown, _sender, sendResponse
         memory.sync = { phase: "error", message, gistId: memory.gistId };
       } finally {
         try {
-          sendResponse({ ok: false, state: appState(), error: message });
+          const retryable =
+            !(error instanceof SnapshotValidationError || error instanceof HandledOperationError) &&
+            canRetrySave(error instanceof StorageCommitError ? error.cause : error);
+          sendResponse({ ok: false, state: appState(), error: message, retryable });
         } catch (responseError) {
           sendResponse({ ok: false, error: `${message}; ${errorMessage(responseError)}` });
         }

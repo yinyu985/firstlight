@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve("dist/extension");
@@ -8,6 +8,7 @@ const workerPath = resolve(root, manifest.background?.service_worker ?? "");
 
 if (manifest.version !== packageJson.version) throw new Error("Manifest version must match package.json");
 if (manifest.minimum_chrome_version !== "120") throw new Error("Manifest minimum Chrome version must match the build target");
+if (manifest.permissions?.length !== 4 || manifest.host_permissions?.length !== 2) throw new Error("Unexpected extension permissions");
 for (const permission of ["alarms", "bookmarks", "storage", "unlimitedStorage"]) {
   if (!manifest.permissions?.includes(permission)) throw new Error(`Manifest permission is missing: ${permission}`);
 }
@@ -40,5 +41,9 @@ function verifyPage(relativePath, label) {
 }
 
 verifyPage(manifest.chrome_url_overrides?.newtab ?? "", "New tab page");
+for (const page of readdirSync(root).filter((file) => file.endsWith(".html") && file !== manifest.chrome_url_overrides?.newtab)) verifyPage(page, page);
+for (const icon of [...Object.values(manifest.icons ?? {}), ...Object.values(manifest.action?.default_icon ?? {})]) {
+  if (typeof icon !== "string" || !existsSync(resolve(root, icon))) throw new Error(`Extension icon is missing: ${icon}`);
+}
 
 console.log("Extension package verified");

@@ -82,6 +82,20 @@ describe("Online local persistence", () => {
     await act(async () => window.dispatchEvent(new Event("pagehide")));
     expect(localStorage.getItem("firstlight.online.settings")).toContain("19");
   });
+  it("keeps a connection error visible after unrelated settings are saved", async () => {
+    vi.useFakeTimers();
+    mounted = await mountUi(<OnlineApp />);
+    await click(control("Open settings"));
+    await input(control<HTMLInputElement>("GitHub token"), "offline-token");
+    await click(document.querySelector<HTMLButtonElement>(".token-row button")!);
+    expect(document.querySelector(".error-card")?.textContent).toContain("Network unavailable");
+    await input(control<HTMLInputElement>("Text size"), "19");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(130);
+    });
+    expect(document.querySelector(".error-card")?.textContent).toContain("Network unavailable");
+    expect(localStorage.getItem("firstlight.online.settings")).toContain("19");
+  });
   it("allows clearing an offline remembered token", async () => {
     localStorage.setItem("firstlight.online.token", "offline-token");
     mounted = await mountUi(<OnlineApp />);

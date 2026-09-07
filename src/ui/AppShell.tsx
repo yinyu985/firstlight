@@ -48,16 +48,17 @@ import { Picker } from "./Picker";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { useModalIsolation } from "./useModalIsolation";
 import { VirtualItems } from "./VirtualItems";
-import { DynamicBackground } from "./DynamicBackground";
 import { deriveFolderTheme } from "./theme";
 import { localThemeVariables, useLocalPanelTheme } from "./panelTheme";
 import { FolderPopover } from "./BookmarkFolder";
 import { focusableElements } from "./focus";
-import { useClock } from "./useClock";
-import { NotesApp, type NotesAppHandle } from "./notes/NotesApp";
+import { Clock } from "./Clock";
+import type { NotesAppHandle } from "./notes/NotesApp";
 import { UI_ERROR_EVENT } from "./uiErrors";
 import { LoadingDiff } from "./LoadingDiff";
 
+const DynamicBackground = lazy(() => import("./DynamicBackground").then((module) => ({ default: module.DynamicBackground })));
+const NotesApp = lazy(() => import("./notes/NotesApp").then((module) => ({ default: module.NotesApp })));
 const DiffView = lazy(() => import("./DiffView"));
 const preloadDiffView = () => {
   void import("./DiffView").catch(() => undefined);
@@ -66,6 +67,7 @@ const preloadDiffView = () => {
 interface Props {
   state: AppState;
   busy?: boolean;
+  localEditsBlocked?: boolean;
   error?: string;
   openSetupOnLaunch?: boolean;
   onOpenBookmark: (url: string) => void;
@@ -553,8 +555,6 @@ function trapTabKey(event: ReactKeyboardEvent<HTMLElement>): void {
 
 export function AppShell(props: Props) {
   const { state, onCloseDiff } = props;
-  const clockVisible = state.settings.clockPosition !== "hidden";
-  const clock = useClock(state.settings.features.clockSeconds, clockVisible);
   const reducedMotion = useReducedMotion();
   const [query, setQuery] = useState("");
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
@@ -823,7 +823,9 @@ export function AppShell(props: Props) {
     >
       {activeBackground.type === "dynamic" && !reducedMotion && (
         <ErrorBoundary key={activeBackground.effect} name="Background" silent>
-          <DynamicBackground background={activeBackground} />
+          <Suspense fallback={null}>
+            <DynamicBackground background={activeBackground} />
+          </Suspense>
         </ErrorBoundary>
       )}
       <div className="scanlines" />
@@ -837,6 +839,7 @@ export function AppShell(props: Props) {
         <button
           type="button"
           className="note-trigger"
+          disabled={props.localEditsBlocked}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -856,21 +859,23 @@ export function AppShell(props: Props) {
       </div>
       {noteOpen && (
         <ErrorBoundary name="Notes" onClose={() => setNoteOpen(false)}>
-          <NotesApp
-            ref={notesAppRef}
-            initialNotes={state.notes}
-            onSave={props.onSaveNotes}
-            onDraft={props.onDraftNotes}
-            readonly={readonly}
-            externalResetKey={notesResetKey}
-          />
+          <Suspense fallback={null}>
+            <NotesApp
+              ref={notesAppRef}
+              initialNotes={state.notes}
+              onSave={props.onSaveNotes}
+              onDraft={props.onDraftNotes}
+              readonly={readonly || props.localEditsBlocked}
+              externalResetKey={notesResetKey}
+            />
+          </Suspense>
         </ErrorBoundary>
       )}
 
       <section className="center-stage" onClick={(event) => event.stopPropagation()}>
         {state.settings.clockPosition !== "hidden" && (
           <header className={`topline clock-${state.settings.clockPosition}`} style={contentFrameStyle}>
-            <time>{clock}</time>
+            <Clock showSeconds={state.settings.features.clockSeconds} />
           </header>
         )}
 
@@ -991,6 +996,7 @@ export function AppShell(props: Props) {
       <button
         ref={settingsTriggerRef}
         className="settings-trigger"
+        disabled={props.localEditsBlocked}
         onClick={(event) => {
           event.stopPropagation();
           setSettingsOpen(true);
@@ -1026,7 +1032,7 @@ export function AppShell(props: Props) {
                 <X size={18} />
               </button>
             </header>
-            <div className="drawer-content">
+            <div className="drawer-content" inert={props.localEditsBlocked}>
               <section className="settings-section">
                 <div className="section-title">
                   <span>BOOKMARKS</span>
@@ -1533,6 +1539,7 @@ export function AppShell(props: Props) {
             <DiffView
               key={diffKey}
               diff={visibleDiff}
+              themeMode={state.settings.features.themeMode}
               busy={busy}
               onClose={() => {
                 setDismissedDiffKey(diffKey);

@@ -65,8 +65,8 @@ export async function projectSnapshotForDiff(snapshot: Snapshot): Promise<Snapsh
     Promise.all(
       nodes.map(async (node) => {
         if (node.url === undefined) return { title: node.title, children: await project(node.children ?? []) };
-        if (encoder.encode(node.url).byteLength <= 4096) return { title: node.title, url: node.url };
         const bytes = encoder.encode(node.url).byteLength;
+        if (bytes <= 4096) return { title: node.title, url: node.url };
         const protocolMatch = node.url.match(/^([a-z][a-z0-9+.-]*:)/i)?.[1];
         const protocol = protocolMatch ?? "unknown:";
         const contentStart = protocolMatch?.length ?? 0;
@@ -257,11 +257,11 @@ export function validateSnapshot(input: unknown): Snapshot {
     typeof layout.rows !== "number" ||
     !Number.isInteger(layout.rows) ||
     layout.rows < 1 ||
-    layout.rows > 10 ||
+    layout.rows > 8 ||
     typeof layout.columns !== "number" ||
     !Number.isInteger(layout.columns) ||
     layout.columns < 2 ||
-    layout.columns > 10 ||
+    layout.columns > 8 ||
     (bookmarkAlignment !== "left" && bookmarkAlignment !== "center" && bookmarkAlignment !== "right")
   ) {
     throw new SnapshotValidationError("Invalid home grid settings");

@@ -105,6 +105,9 @@ describe("extension UI state transport", () => {
   it("flushes an immediate pagehide and retains one backup until acknowledgement", async () => {
     const backend = await mountExtension();
     await click(control("Open note panel"));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     await click(control("Create new note"));
     await input(control<HTMLTextAreaElement>("Note content"), "Before immediate refresh");
     await act(async () => {
@@ -120,6 +123,9 @@ describe("extension UI state transport", () => {
   it("retries Notes after the Notes window is closed and shows failures outside settings", async () => {
     const backend = await mountExtension();
     await click(control("Open note panel"));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     await click(control("Create new note"));
     await input(control<HTMLTextAreaElement>("Note content"), "Keep after closing");
     backend.sendMessage.mockRejectedValueOnce(new Error("Notes storage unavailable"));

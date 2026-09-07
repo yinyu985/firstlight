@@ -4,6 +4,7 @@ import type { AppState, ExtensionRequest, ExtensionResponse } from "../shared/pr
 import { AppShell } from "./AppShell";
 import { applyStatePatch, type StatePatch } from "../shared/statePatch";
 import { clearPendingNotes, keepPendingNotes, readPendingNotes } from "./notes/pendingNotes";
+import { canRetrySave, SaveError } from "../shared/saveError";
 
 let serverState: AppState | undefined;
 
@@ -17,7 +18,7 @@ async function request(message: ExtensionRequest): Promise<AppState> {
     if (!serverState) serverState = await request({ type: "GET_STATE" });
     serverState = applyStatePatch(serverState, response.patch);
   }
-  if (!response.ok || !serverState) throw new Error(response.error ?? "The extension service returned no state");
+  if (!response.ok || !serverState) throw new SaveError(response.error ?? "The extension service returned no state", response.retryable !== false);
   return serverState;
 }
 
@@ -57,6 +58,10 @@ function cachedStartupState(): AppState | undefined {
 export function ExtensionApp() {
   const [state, setState] = useState<AppState | undefined>(cachedStartupState);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [restorePending, setRestorePending] = useState(false);
+  const ready = useRef(false);
+  const restoreInProgress = useRef(false);
   const [error, setError] = useState<string>();
   const setupRequested = useRef(false);
   const operationPending = useRef(false);
@@ -102,6 +107,8 @@ export function ExtensionApp() {
         } catch {
           setError("The pending Notes draft could not be read and was left unchanged.");
         }
+        ready.current = true;
+        setLoaded(true);
         acceptState(next);
         if (pendingNotes.current) void saveNotesRef.current(pendingNotes.current).catch(() => undefined);
       })
@@ -114,6 +121,7 @@ export function ExtensionApp() {
     };
     chrome.runtime.onMessage.addListener(listener);
     const flush = () => {
+      if (!ready.current || restoreInProgress.current) return;
       const notes = pendingNotes.current;
       if (notes) {
         try {
@@ -127,9 +135,22 @@ export function ExtensionApp() {
       const settings = pendingSettings.current;
       if (settings) void request({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
     };
+    // Normal drafts fit in the existing backup. If a large draft cannot be backed
+    // up, ask the user to stay instead of silently promising refresh protection.
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!pendingNotes.current || restoreInProgress.current) return;
+      try {
+        keepPendingNotes(pendingNotes.current);
+      } catch {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
     window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", beforeUnload);
     return () => {
       window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", beforeUnload);
       if (notesRetryTimer.current !== undefined) window.clearTimeout(notesRetryTimer.current);
       flush();
       chrome.runtime.onMessage.removeListener(listener);
@@ -142,7 +163,7 @@ export function ExtensionApp() {
 
   const act = useCallback(
     async (message: ExtensionRequest) => {
-      if (operationPending.current) return false;
+      if (!ready.current || operationPending.current) return false;
       operationPending.current = true;
       setBusy(true);
       setError(undefined);
@@ -178,7 +199,7 @@ export function ExtensionApp() {
     const handled = task.catch((cause) => {
       if (generation === settingsGeneration.current) {
         setError(cause instanceof Error ? cause.message : "Unable to save settings");
-        if (pendingSettings.current === submitted && settingsRetryTimer.current === undefined) {
+        if (canRetrySave(cause) && pendingSettings.current === submitted && settingsRetryTimer.current === undefined) {
           settingsRetryTimer.current = window.setTimeout(() => {
             settingsRetryTimer.current = undefined;
             void submitPendingSettingsRef.current().catch(() => undefined);
@@ -235,6 +256,7 @@ export function ExtensionApp() {
   );
 
   const saveSettings = useCallback((settings: SyncedSettings) => {
+    if (!ready.current || restoreInProgress.current) return;
     pendingSettings.current = settings;
     writeCachedSettings(settings);
     setState((current) => (current ? { ...current, settings } : current));
@@ -249,6 +271,7 @@ export function ExtensionApp() {
 
   const saveNotes = useCallback(
     (notes: SyncNote[]): Promise<void> => {
+      if (!ready.current || restoreInProgress.current) return Promise.reject(new SaveError("Wait for Notes to finish loading or restoring.", false));
       const existing = notesJobs.current.get(notes);
       if (existing) return existing;
       const generation = notesGeneration.current;
@@ -273,9 +296,9 @@ export function ExtensionApp() {
             try {
               keepPendingNotes(pendingNotes.current);
             } catch {
-              /* The live draft and worker retry remain intact. */
+              setError("Notes have not been saved or backed up. Keep this tab open until saving succeeds.");
             }
-            if (notesRetryTimer.current === undefined)
+            if (canRetrySave(cause) && notesRetryTimer.current === undefined)
               notesRetryTimer.current = window.setTimeout(() => {
                 notesRetryTimer.current = undefined;
                 if (pendingNotes.current) void saveNotesRef.current(pendingNotes.current).catch(() => undefined);
@@ -296,6 +319,7 @@ export function ExtensionApp() {
   saveNotesRef.current = saveNotes;
 
   const draftNotes = useCallback((notes: SyncNote[]) => {
+    if (!ready.current || restoreInProgress.current) return;
     pendingNotes.current = notes;
   }, []);
 
@@ -317,7 +341,8 @@ export function ExtensionApp() {
   return (
     <AppShell
       state={state}
-      busy={busy}
+      busy={busy || restorePending || !loaded}
+      localEditsBlocked={!loaded || restorePending || state.sync.phase === "restoring"}
       error={error}
       openSetupOnLaunch={state.openSetupOnLaunch}
       onOpenBookmark={openBookmark}
@@ -330,25 +355,37 @@ export function ExtensionApp() {
         if (!(await actAfterSettings({ type: "USE_LOCAL", diffId }))) throw new Error("Unable to upload the local snapshot");
       }}
       onUseRemote={async (diffId) => {
-        cancelPendingSettings();
-        notesGeneration.current += 1;
+        if (!ready.current || operationPending.current || restoreInProgress.current) throw new Error("Another operation is still running");
+        restoreInProgress.current = true;
+        setRestorePending(true);
         const draft = pendingNotes.current;
-        pendingNotes.current = undefined;
-        if (notesRetryTimer.current !== undefined) window.clearTimeout(notesRetryTimer.current);
-        notesRetryTimer.current = undefined;
+        let succeeded = false;
         try {
-          clearPendingNotes();
-        } catch {
-          pendingNotes.current = draft;
-          setError("Unable to clear the pending Notes draft. Remote restore was not started.");
-          throw new Error("Unable to clear the pending Notes draft");
-        }
-        if (!(await act({ type: "USE_REMOTE", diffId }))) {
-          if (draft) {
+          // Save settings first. A failure leaves them pending and prevents restore.
+          // If this changes the diff, the worker asks for another review rather than
+          // silently using an obsolete comparison.
+          await flushPendingSettings();
+          cancelPendingSettings();
+          notesGeneration.current += 1;
+          pendingNotes.current = undefined;
+          if (notesRetryTimer.current !== undefined) window.clearTimeout(notesRetryTimer.current);
+          notesRetryTimer.current = undefined;
+          try {
+            clearPendingNotes();
+          } catch {
+            const message = "Unable to clear the pending Notes draft. Remote restore was not started.";
+            setError(message);
+            throw new Error(message);
+          }
+          succeeded = await act({ type: "USE_REMOTE", diffId });
+          if (!succeeded) throw new Error("Unable to restore the remote snapshot");
+        } finally {
+          restoreInProgress.current = false;
+          setRestorePending(false);
+          if (!succeeded && draft) {
             pendingNotes.current = draft;
             void saveNotes(draft).catch(() => undefined);
           }
-          throw new Error("Unable to restore the remote snapshot");
         }
       }}
       onCloseDiff={(diffId) => void act({ type: "CLEAR_DIFF", diffId })}

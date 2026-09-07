@@ -15,9 +15,20 @@ export function useClock(showSeconds: boolean, enabled = true): string {
   const [clock, setClock] = useState(format);
   useEffect(() => {
     if (!enabled) return;
-    setClock(format());
-    const timer = window.setInterval(() => setClock(format()), 1000);
-    return () => window.clearInterval(timer);
-  }, [enabled, format]);
+    let timer: number | undefined;
+    const interval = showSeconds ? 1_000 : 60_000;
+    const update = () => {
+      window.clearTimeout(timer);
+      if (document.hidden) return;
+      setClock(format());
+      timer = window.setTimeout(update, interval - (Date.now() % interval));
+    };
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [enabled, format, showSeconds]);
   return clock;
 }
