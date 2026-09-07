@@ -3,6 +3,7 @@ import { connectOnline, sampleSnapshot } from "./fixtures";
 
 for (const effect of ["galaxy", "silk", "flash"] as const) {
   test(`${effect} stops drawing at rest and resumes on interaction or settings changes`, async ({ page }) => {
+    if (effect === "flash") await page.clock.install();
     await page.addInitScript(() => {
       const counters = { draws: 0 };
       Object.assign(window, { firstlightRenderCounters: counters });
@@ -38,20 +39,32 @@ for (const effect of ["galaxy", "silk", "flash"] as const) {
     await expect(page.locator("canvas.dynamic-background")).toBeVisible();
     const draws = () => page.evaluate(() => (window as typeof window & { firstlightRenderCounters: { draws: number } }).firstlightRenderCounters.draws);
     if (effect === "flash") {
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
       await page.mouse.move(100, 180);
       await page.mouse.move(500, 190, { steps: 3 });
+      await page.clock.runFor(100);
     }
     await expect.poll(draws).toBeGreaterThan(0);
-    await expect
-      .poll(
-        async () => {
-          const previous = await draws();
-          await page.waitForTimeout(200);
-          return (await draws()) - previous;
-        },
-        { timeout: 15_000 }
-      )
-      .toBe(0);
+    if (effect === "flash") {
+      // Flash settles in simulated time, with each step capped at 1/60 second.
+      // Run every animation callback so slow CI GPUs cannot stretch that horizon
+      // beyond a wall-clock poll timeout. fastForward would skip those callbacks.
+      await page.clock.runFor(5000);
+      const settled = await draws();
+      await page.clock.runFor(1000);
+      expect(await draws()).toBe(settled);
+    } else {
+      await expect
+        .poll(
+          async () => {
+            const previous = await draws();
+            await page.waitForTimeout(200);
+            return (await draws()) - previous;
+          },
+          { timeout: 15_000 }
+        )
+        .toBe(0);
+    }
     const before = await draws();
     if (effect === "silk") {
       await page.getByRole("button", { name: "Open settings" }).click();
@@ -59,6 +72,7 @@ for (const effect of ["galaxy", "silk", "flash"] as const) {
     } else {
       await page.mouse.move(100, 200);
       await page.mouse.move(600, 240, { steps: 3 });
+      if (effect === "flash") await page.clock.runFor(100);
     }
     await expect.poll(draws).toBeGreaterThan(before);
   });
