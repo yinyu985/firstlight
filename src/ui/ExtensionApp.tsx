@@ -58,6 +58,7 @@ export function ExtensionApp() {
   const [state, setState] = useState<AppState | undefined>(cachedStartupState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const setupRequested = useRef(false);
   const operationPending = useRef(false);
   const pendingSettings = useRef<SyncedSettings | undefined>(undefined);
   const pendingNotes = useRef<SyncNote[] | undefined>(undefined);
@@ -83,7 +84,10 @@ export function ExtensionApp() {
   );
   const acceptState = useCallback(
     (next: AppState) => {
-      const optimistic = withOptimisticState(next);
+      // The worker consumes this one-time request immediately after GET_STATE.
+      // Retain it for this page even if the clearing broadcast is batched before render.
+      setupRequested.current ||= next.openSetupOnLaunch;
+      const optimistic = withOptimisticState({ ...next, openSetupOnLaunch: setupRequested.current });
       writeCachedSettings(optimistic.settings);
       setState(optimistic);
     },

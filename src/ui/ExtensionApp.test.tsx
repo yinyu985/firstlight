@@ -61,6 +61,47 @@ async function mountExtension() {
 }
 
 describe("extension UI state transport", () => {
+  it("keeps first-run setup visible when the worker clears its flag before React renders", async () => {
+    const startup: AppState = {
+      target: "extension",
+      settings: DEFAULT_SETTINGS,
+      bookmarks: [],
+      notes: [],
+      sync: { phase: "local-only", message: "Local only" },
+      tokenConfigured: false,
+      openSetupOnLaunch: true
+    };
+    let respond!: (response: { ok: boolean; state: AppState }) => void;
+    const response = new Promise<{ ok: boolean; state: AppState }>((resolve) => {
+      respond = resolve;
+    });
+    let notify!: (message: { type: string; patch: StatePatch }) => void;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(() => response),
+        onMessage: {
+          addListener: (listener: typeof notify) => {
+            notify = listener;
+          },
+          removeListener: vi.fn()
+        }
+      }
+    });
+    mounted = await mountUi(<ExtensionApp />);
+    // Deliver both messages in one React batch, as can happen on a busy runner.
+    await act(async () => {
+      respond({ ok: true, state: startup });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      notify({ type: "STATE_CHANGED", patch: { openSetupOnLaunch: false } });
+    });
+    expect(document.querySelector('.settings-drawer[role="dialog"]')).not.toBeNull();
+    await key(document.querySelector<HTMLElement>(".settings-drawer")!, "Escape");
+    await act(async () => {
+      notify({ type: "STATE_CHANGED", patch: { sync: { phase: "local-only", message: "Local only" } } });
+    });
+    expect(document.querySelector(".settings-drawer")).toBeNull();
+  });
+
   it("flushes an immediate pagehide and retains one backup until acknowledgement", async () => {
     const backend = await mountExtension();
     await click(control("Open note panel"));
