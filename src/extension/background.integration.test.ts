@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, createDiffId, snapshotFrom, type BookmarkItem, type Snapshot, type SyncedSettings } from "../shared/model";
 import type { ExtensionRequest, ExtensionResponse, StoredState } from "../shared/protocol";
 import { snapshotHash } from "../shared/snapshot";
-import type { RemoteSnapshot } from "../shared/gist";
+import { GitHubError, type RemoteSnapshot } from "../shared/gist";
 
 const gistMock = vi.hoisted(() => ({
   discover: vi.fn(),
   read: vi.fn(),
   create: vi.fn(),
-  update: vi.fn()
+  update: vi.fn(),
+  rekey: vi.fn()
 }));
 
 vi.mock("../shared/gist", async () => {
@@ -18,6 +19,7 @@ vi.mock("../shared/gist", async () => {
     read = gistMock.read;
     create = gistMock.create;
     update = gistMock.update;
+    rekey = gistMock.rekey;
   }
   return { ...actual, GistClient: MockGistClient };
 });
@@ -108,7 +110,9 @@ function chromeMock(initialState: StoredState, initialBookmarks: BookmarkItem[] 
   const api = {
     storage: {
       local: {
-        get: vi.fn(async () => structuredClone(storageValues)),
+        get: vi.fn(async (keys: string[]) =>
+          Object.fromEntries(keys.filter((key) => key in storageValues).map((key) => [key, structuredClone(storageValues[key])]))
+        ),
         set: storageSet
       },
       session: {
@@ -215,6 +219,7 @@ beforeEach(() => {
   gistMock.discover.mockReset().mockResolvedValue([]);
   gistMock.read.mockReset();
   gistMock.create.mockReset();
+  gistMock.rekey.mockReset();
   gistMock.update.mockReset().mockImplementation(async (gistId: string, snapshot: Snapshot) => ({
     ...remote(snapshot, "2026-08-20T09:02:00.000Z"),
     gistId
@@ -224,12 +229,280 @@ beforeEach(() => {
 afterEach(async () => {
   vi.clearAllTimers();
   await flushAsync();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.resetModules();
   vi.useRealTimers();
 });
 
 describe("extension background integration", () => {
+  it("does not replace an existing credential when the new token fails authentication", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(local);
+    const mock = chromeMock(state);
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.discover.mockRejectedValue(new GitHubError("Bad credentials", 401));
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "SAVE_TOKEN", token: "invalid" });
+    expect(response.ok).toBe(false);
+    expect(mock.getStored()).toMatchObject({ token: "token", gistId: "gist-1", baseline: state.baseline });
+  });
+
+  it("only changes storage preference when saving the same normalized token", async () => {
+    const mock = chromeMock(await connectedState(snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME)));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "SAVE_TOKEN", token: " ‘token’ ", rememberToken: false });
+    expect(response.ok).toBe(true);
+    expect(response.state?.token).toBe("token");
+    expect(gistMock.discover).not.toHaveBeenCalled();
+    expect(gistMock.rekey).not.toHaveBeenCalled();
+  });
+
+  it("journals a failed token rekey, blocks uploads and resumes after Worker restart", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(local);
+    const mock = chromeMock(state);
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.discover.mockResolvedValue([remote(local)]);
+    gistMock.read.mockRejectedValue(new (await import("../shared/notesEnvelope")).NotesDecryptionError());
+    gistMock.rekey.mockImplementation(async (_gistId, _oldToken, beforeWrite) => {
+      await beforeWrite();
+      throw new GitHubError("offline", undefined, "network");
+    });
+    await import("./background");
+    const failed = await sendRequest(mock.messageListeners[0], { type: "SAVE_TOKEN", token: "replacement", rememberToken: true });
+    expect(failed.ok).toBe(false);
+    expect(mock.getStored()).toMatchObject({
+      token: "token",
+      tokenMigration: { token: "replacement", gistId: "gist-1" },
+      syncEnabled: false,
+      baseline: state.baseline
+    });
+    expect((await sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" })).ok).toBe(false);
+    expect(gistMock.update).not.toHaveBeenCalled();
+    vi.resetModules();
+    gistMock.rekey.mockResolvedValue(remote(local));
+    await import("./background");
+    const resumed = await sendRequest(mock.messageListeners[1], { type: "SAVE_TOKEN", token: "replacement", rememberToken: true });
+    expect(resumed.ok).toBe(true);
+    expect(mock.getStored().token).toBe("replacement");
+    expect(mock.getStored().tokenMigration).toBeUndefined();
+    expect(gistMock.rekey).toHaveBeenLastCalledWith("gist-1", "token");
+  });
+
+  it("retains the migration journal if the final local connection commit fails", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(local));
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.discover.mockResolvedValue([remote(local)]);
+    gistMock.read.mockRejectedValue(new (await import("../shared/notesEnvelope")).NotesDecryptionError());
+    gistMock.rekey.mockImplementation(async (_gistId, _oldToken, beforeWrite) => {
+      await beforeWrite();
+      return remote(local);
+    });
+    await import("./background");
+    const normal = mock.storageSet.getMockImplementation()!;
+    mock.storageSet.mockImplementation(async (values) => {
+      if ((values.firstlight as StoredState)?.token === "replacement") throw new Error("disk full");
+      return normal(values);
+    });
+    const response = await sendRequest(mock.messageListeners[0], { type: "SAVE_TOKEN", token: "replacement", rememberToken: true });
+    expect(response.ok).toBe(false);
+    expect(mock.getStored()).toMatchObject({ token: "token", tokenMigration: { token: "replacement" }, syncEnabled: false });
+  });
+
+  it("does not overwrite local Notes or advance the baseline when decryption fails", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(local);
+    const mock = chromeMock(state);
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.read.mockRejectedValue(new (await import("../shared/notesEnvelope")).NotesDecryptionError());
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" });
+    expect(response.ok).toBe(false);
+    expect(mock.getStored().baseline).toEqual(state.baseline);
+    expect(mock.getStored().notes).toEqual(state.notes);
+    expect(gistMock.update).not.toHaveBeenCalled();
+  });
+  it("retries an automatic upload's failed baseline commit without advancing its baseline", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(baseline);
+    state.pendingUpload = { dueAt: Date.now() - 1, attempts: 0 };
+    const mock = chromeMock(state, [{ title: "New", url: "https://new.test" }]);
+    const store = mock.storageSet.getMockImplementation()!;
+    let failed = false;
+    mock.storageSet.mockImplementation(async (value) => {
+      const metadata = value.firstlight as StoredState;
+      if (!failed && metadata.baseline && metadata.baseline.localHash !== state.baseline!.localHash) {
+        failed = true;
+        throw new Error("temporary baseline storage failure");
+      }
+      return store(value);
+    });
+    gistMock.read.mockResolvedValue(remote(baseline));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    await flushImmediateTimers();
+    await vi.waitFor(() => expect(mock.getStored().pendingUpload?.attempts).toBe(1));
+    expect(mock.getStored().baseline).toEqual(state.baseline);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(mock.getStored().pendingUpload).toBeUndefined());
+    expect(mock.getStored().baseline?.localHash).not.toBe(state.baseline!.localHash);
+  });
+  it("retains edits and their pending upload when an older network write finishes", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(baseline);
+    const mock = chromeMock(state, [{ title: "First upload", url: "https://first.test" }]);
+    let finish!: () => void;
+    let uploaded!: Snapshot;
+    gistMock.read.mockResolvedValue(remote(baseline));
+    gistMock.update.mockImplementation((_id: string, snapshot: Snapshot) => {
+      uploaded = snapshot;
+      return new Promise<RemoteSnapshot>((resolve) => {
+        finish = () => resolve(remote(snapshot));
+      });
+    });
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const uploading = sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const notes = [{ id: "new", name: "", content: "Typed while uploading", createtime: LOCAL_TIME, updatetime: LOCAL_TIME }];
+    expect((await sendRequest(mock.messageListeners[0], { type: "SAVE_NOTES", notes })).ok).toBe(true);
+    finish();
+    expect((await uploading).ok).toBe(true);
+    expect(mock.getStored().notes).toEqual(notes);
+    expect(mock.getStored().baseline?.localHash).toBe(await snapshotHash(uploaded));
+    expect(mock.getStored().pendingUpload).toBeDefined();
+  });
+
+  it("stops automatic retries for a permanent permission failure", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(baseline);
+    state.pendingUpload = { dueAt: Date.now() - 1, attempts: 0 };
+    const mock = chromeMock(state, [{ title: "Local", url: "https://local.test" }]);
+    gistMock.read.mockRejectedValue(new GitHubError("Insufficient permission", 403));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    await flushImmediateTimers();
+    await vi.waitFor(() => expect(mock.getStored().sync?.phase).toBe("error"));
+    expect(mock.getStored().pendingUpload).toBeUndefined();
+    const calls = gistMock.read.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(gistMock.read).toHaveBeenCalledTimes(calls);
+  });
+  it("keeps the old baseline when committing a verified upload fails", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(baseline);
+    const mock = chromeMock(state, [{ title: "New", url: "https://new.test" }]);
+    const store = mock.storageSet.getMockImplementation()!;
+    mock.storageSet.mockImplementation(async (value) => {
+      const metadata = value.firstlight as StoredState;
+      if (metadata.baseline && metadata.baseline.localHash !== state.baseline!.localHash) throw new Error("baseline commit failed");
+      return store(value);
+    });
+    gistMock.read.mockResolvedValue(remote(baseline));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" });
+    expect(response.ok).toBe(false);
+    expect(mock.getStored().baseline).toEqual(state.baseline);
+  });
+
+  it("retains a restore journal when rollback metadata cannot be committed", async () => {
+    const before = snapshotFrom([{ title: "Before", url: "https://before.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const target = snapshotFrom([{ title: "Target", url: "https://target.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(before), before.bookmarks);
+    gistMock.read.mockResolvedValue(remote(target));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const comparison = await sendRequest(mock.messageListeners[0], { type: "COMPARE_REMOTE" });
+    const store = mock.storageSet.getMockImplementation()!;
+    let journalWritten = false;
+    mock.storageSet.mockImplementation(async (value) => {
+      const metadata = value.firstlight as StoredState;
+      if (metadata.restoreJournal) journalWritten = true;
+      if (journalWritten && !metadata.restoreJournal) throw new Error("journal commit failed");
+      return store(value);
+    });
+    mock.setCreateFailures(1);
+    const result = await sendRequest(mock.messageListeners[0], { type: "USE_REMOTE", diffId: comparison.state!.diff!.id });
+    expect(result.error).toContain("Rollback also failed");
+    expect(mock.getStored().restoreJournal).toBeDefined();
+    expect(mock.bookmarkItems()).toEqual(before.bookmarks);
+  });
+
+  it("preserves malformed recovery evidence and refuses remote operations", async () => {
+    const journal = { recoveryPointId: "missing", targetHash: "a".repeat(64), startedAt: "2026-08-20T09:00:00Z" };
+    const points = [{ id: "damaged", snapshot: { notes: "raw evidence" } }] as never;
+    const mock = chromeMock({ setupSeen: true, token: "token", syncEnabled: true, restoreJournal: journal, recoveryPoints: points });
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    expect(mock.getStored().restoreJournal).toEqual(journal);
+    expect(mock.getStored().recoveryPoints).toEqual(points);
+    expect((await sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" })).ok).toBe(false);
+    expect(gistMock.read).not.toHaveBeenCalled();
+  });
+
+  it("saves local Notes and settings while a remote read is pending, then compares the latest state", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(baseline));
+    let finish!: (value: RemoteSnapshot) => void;
+    gistMock.read.mockImplementation(
+      () =>
+        new Promise<RemoteSnapshot>((resolve) => {
+          finish = resolve;
+        })
+    );
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const comparing = sendRequest(mock.messageListeners[0], { type: "COMPARE_REMOTE" });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const notes = [{ id: "a", name: "New", content: "Saved during network wait", createtime: LOCAL_TIME, updatetime: LOCAL_TIME }];
+    expect((await sendRequest(mock.messageListeners[0], { type: "SAVE_NOTES", notes })).ok).toBe(true);
+    const settings = { ...DEFAULT_SETTINGS, foreground: { ...DEFAULT_SETTINGS.foreground, fontSize: 18 } };
+    expect((await sendRequest(mock.messageListeners[0], { type: "SAVE_SETTINGS", settings })).ok).toBe(true);
+    expect(mock.getStored().notes).toEqual(notes);
+    finish(remote(baseline));
+    const result = await comparing;
+    expect(result.state?.diff?.left.notes).toEqual(notes);
+    expect(mock.getStored().pendingUpload).toBeUndefined();
+    await sendRequest(mock.messageListeners[0], { type: "SAVE_NOTES", notes: [{ ...notes[0], content: "Still conflicting" }] });
+    expect(mock.getStored().pendingUpload).toBeUndefined();
+  });
+
+  it("does not repeat a successful startup check after a Worker restart in the same session", async () => {
+    const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(baseline));
+    gistMock.read.mockResolvedValue(remote(baseline));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    await flushImmediateTimers();
+    await vi.waitFor(() => expect(mock.api.storage.session.set).toHaveBeenCalledWith({ "firstlight.startup-checked": true }));
+    const calls = gistMock.read.mock.calls.length;
+    vi.resetModules();
+    await import("./background");
+    await sendRequest(mock.messageListeners[1], { type: "GET_STATE" });
+    await flushImmediateTimers();
+    expect(gistMock.read).toHaveBeenCalledTimes(calls);
+  });
+
+  it("ignores bookmark events that do not change the bookmark bar", async () => {
+    const mock = chromeMock({ setupSeen: true }, [{ title: "Same", url: "https://same.test" }]);
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    mock.storageSet.mockClear();
+    mock.api.runtime.sendMessage.mockClear();
+    mock.bookmarkListeners.changed.mock.calls[0][0]("other-bookmark", {});
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mock.storageSet).not.toHaveBeenCalled();
+    expect(mock.api.runtime.sendMessage).not.toHaveBeenCalled();
+  });
   it("registers Chrome listeners and answers GET_STATE through the runtime boundary", async () => {
     const mock = chromeMock({ setupSeen: true });
     vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
@@ -295,7 +568,7 @@ describe("extension background integration", () => {
       openTarget: "current-tab",
       features: { searchIcon: DEFAULT_SETTINGS.features.searchIcon }
     });
-    expect(response.state?.toast?.message).toBe("Some stored settings were invalid and were repaired");
+    expect(response.state?.toast?.message).toBe("Some stored settings were invalid and were repaired (features.searchIcon)");
     expect(mock.getStored().baseline).toBeUndefined();
   });
 
@@ -581,7 +854,7 @@ describe("extension background integration", () => {
     const state = await connectedState(baseline);
     state.pendingUpload = { dueAt: Date.now() - 1, attempts: 0 };
     const mock = chromeMock(state, [{ title: "Local", url: "https://local.example" }]);
-    gistMock.read.mockRejectedValue(new Error("temporary network failure"));
+    gistMock.read.mockRejectedValue(new GitHubError("temporary network failure", undefined, "network"));
     vi.stubGlobal("chrome", mock.api as unknown as typeof chrome);
 
     await import("./background");
@@ -593,5 +866,153 @@ describe("extension background integration", () => {
     expect(mock.getStored().pendingUpload).toEqual({ dueAt: expectedRetryAt, attempts: 1 });
     expect(mock.getStored().sync).toMatchObject({ phase: "error", message: "temporary network failure" });
     expect(mock.alarmsCreate).toHaveBeenLastCalledWith("firstlight-pending-upload", { when: expectedRetryAt });
+  });
+});
+
+describe("worker and restore failure regressions", () => {
+  it("returns the local homepage before reading a deferred comparison and gates uploads until it is validated", async () => {
+    const local = snapshotFrom([{ title: "Local", url: "https://local.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const target = snapshotFrom([{ title: "Remote", url: "https://remote.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const leftHash = await snapshotHash(local);
+    const rightHash = await snapshotHash(target);
+    const diff = {
+      id: createDiffId("remote", leftHash, rightHash, REMOTE_TIME),
+      source: "remote",
+      leftHash,
+      rightHash,
+      gistId: "gist-1",
+      remoteUpdatedAt: REMOTE_TIME,
+      left: local,
+      right: target
+    };
+    const state = await connectedState(local);
+    const mock = chromeMock(state, local.bookmarks);
+    await mock.storageSet({
+      firstlight: { ...state, storageVersion: 2, setupSeen: false, pendingUpload: { dueAt: Date.now(), attempts: 0 } },
+      "firstlight.notes": [],
+      "firstlight.pendingDiff": diff
+    });
+    const read = mock.api.storage.local.get.getMockImplementation()!;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mock.api.storage.local.get.mockImplementation(async (keys) => {
+      if (keys.includes("firstlight.pendingDiff")) await blocked;
+      return read(keys);
+    });
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const initial = await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    expect(initial.ok).toBe(true);
+    expect(initial.state?.bookmarks).toEqual(local.bookmarks);
+    expect(initial.state?.diff).toBeUndefined();
+    await flushImmediateTimers();
+    expect(gistMock.read).not.toHaveBeenCalled();
+    expect(mock.getStored().pendingDiff).toEqual(diff);
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    let releaseHash!: () => void;
+    const hashBlocked = new Promise<void>((resolve) => {
+      releaseHash = resolve;
+    });
+    const hashing = vi.spyOn(crypto.subtle, "digest").mockImplementationOnce(async (...args) => {
+      await hashBlocked;
+      return digest(...args);
+    });
+    const editing = sendRequest(mock.messageListeners[0], { type: "SAVE_SETTINGS", settings: { ...DEFAULT_SETTINGS, openTarget: "current-tab" } });
+    release();
+    await vi.waitFor(() => expect(hashing).toHaveBeenCalled());
+    const duringValidation = await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    expect(duringValidation.state?.diff).toBeUndefined();
+    releaseHash();
+    const edited = await editing;
+    expect(edited.ok).toBe(true);
+    expect(edited.state?.diff?.right).toEqual(target);
+    expect(edited.state?.diff?.left.config.openTarget).toBe("current-tab");
+    expect(mock.getStored().pendingUpload).toBeUndefined();
+    expect(gistMock.update).not.toHaveBeenCalled();
+  });
+
+  it("schedules a bookmark change that wakes a fresh worker", async () => {
+    const base = snapshotFrom([{ title: "Before", url: "https://example.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(base), [{ title: "After", url: "https://example.test" }]);
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.read.mockResolvedValue(remote(base));
+    await import("./background");
+    mock.bookmarkListeners.changed.mock.calls[0][0]("10", { title: "After" });
+    await vi.advanceTimersByTimeAsync(200);
+    await flushAsync();
+    await vi.waitFor(() => expect(mock.getStored().pendingUpload).toBeDefined());
+  });
+  it("surfaces an invalid restore journal in a fresh toast", async () => {
+    const base = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const stored = await connectedState(base);
+    stored.restoreJournal = { recoveryPointId: "missing", targetHash: "0".repeat(64), startedAt: new Date().toISOString() };
+    const mock = chromeMock(stored);
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    const response = await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    expect(response.state?.toast?.message).toContain("Interrupted restore");
+  });
+  it("rolls back a restore if its final baseline commit fails", async () => {
+    const local = snapshotFrom([{ title: "Before", url: "https://before.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const target = snapshotFrom([{ title: "After", url: "https://after.test" }], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const state = await connectedState(local);
+    const leftHash = await snapshotHash(local),
+      rightHash = await snapshotHash(target);
+    state.pendingDiff = {
+      id: createDiffId("remote", leftHash, rightHash, REMOTE_TIME),
+      source: "remote",
+      leftHash,
+      rightHash,
+      gistId: "gist-1",
+      remoteUpdatedAt: REMOTE_TIME,
+      left: local,
+      right: target
+    };
+    const mock = chromeMock(state, local.bookmarks);
+    gistMock.read.mockResolvedValue(remote(target));
+    vi.stubGlobal("chrome", mock.api);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    const normalSave = mock.storageSet.getMockImplementation()!;
+    let failed = false;
+    mock.storageSet.mockImplementation(async (values) => {
+      const m = values.firstlight as StoredState | undefined;
+      if (!failed && m?.baseline?.localHash === rightHash) {
+        failed = true;
+        throw new Error("baseline disk failure");
+      }
+      return normalSave(values);
+    });
+    const response = await sendRequest(mock.messageListeners[0], { type: "USE_REMOTE", diffId: state.pendingDiff.id });
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain("rolled back");
+    expect(mock.bookmarkItems()).toEqual(local.bookmarks);
+    expect(mock.getStored().baseline?.localHash).toBe(leftHash);
+    expect(mock.getStored().restoreJournal).toBeUndefined();
+  });
+
+  it("binds a newly created Gist before offering its conflict choices", async () => {
+    const mock = chromeMock({ setupSeen: true, settings: DEFAULT_SETTINGS, localUpdatedAt: LOCAL_TIME }, []);
+    vi.stubGlobal("chrome", mock.api);
+    let finishCreate!: (value: RemoteSnapshot) => void;
+    const created = new Promise<RemoteSnapshot>((resolve) => {
+      finishCreate = resolve;
+    });
+    gistMock.create.mockReturnValue(created);
+    await import("./background");
+    await sendRequest(mock.messageListeners[0], { type: "GET_STATE" });
+    const connecting = sendRequest(mock.messageListeners[0], { type: "SAVE_TOKEN", token: "new-token" });
+    await flushImmediateTimers();
+    expect(gistMock.create).toHaveBeenCalled();
+    const original = gistMock.create.mock.calls[0][0] as Snapshot;
+    await sendRequest(mock.messageListeners[0], { type: "SAVE_SETTINGS", settings: { ...DEFAULT_SETTINGS, openTarget: "current-tab" } });
+    finishCreate(remote(original));
+    const connected = await connecting;
+    gistMock.read.mockResolvedValue(remote(original));
+    const diffId = connected.state!.diff!.id;
+    const result = await sendRequest(mock.messageListeners[0], { type: "USE_REMOTE", diffId });
+    expect(result.ok).toBe(true);
   });
 });
