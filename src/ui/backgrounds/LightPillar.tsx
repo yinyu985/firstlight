@@ -334,7 +334,7 @@ export function LightPillar({
       lastFrame = timestamp;
       const settings = runtimeRef.current;
       elapsed += delta * settings.speed;
-      const rotation = settings.rotation * Math.PI / 180;
+      const rotation = (settings.rotation * Math.PI) / 180;
       const automaticRotation = elapsed * 0.3;
       const { gl, program, position, uniforms } = renderer;
       gl.useProgram(program);

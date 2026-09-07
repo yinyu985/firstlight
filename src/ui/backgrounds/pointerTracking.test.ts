@@ -33,7 +33,11 @@ describe("background pointer tracking", () => {
     mockCanvasBounds(canvas);
     const moves: Array<{ x: number; y: number }> = [];
     const activity: boolean[] = [];
-    const unbind = bindWindowPointer(canvas, (pointer) => moves.push(pointer), (active) => activity.push(active));
+    const unbind = bindWindowPointer(
+      canvas,
+      (pointer) => moves.push(pointer),
+      (active) => activity.push(active)
+    );
 
     window.dispatchEvent(new MouseEvent("pointermove", { clientX: 420, clientY: 150 }));
     window.dispatchEvent(new MouseEvent("pointerout", { relatedTarget: null }));

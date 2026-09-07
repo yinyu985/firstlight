@@ -36,7 +36,13 @@ function parseHex(hex: string): Rgb {
 }
 
 function toHex({ r, g, b }: Rgb): string {
-  return `#${[r, g, b].map((value) => Math.round(Math.max(0, Math.min(255, value))).toString(16).padStart(2, "0")).join("")}`;
+  return `#${[r, g, b]
+    .map((value) =>
+      Math.round(Math.max(0, Math.min(255, value)))
+        .toString(16)
+        .padStart(2, "0")
+    )
+    .join("")}`;
 }
 
 function mix(color: string, target: Rgb, amount: number): string {
@@ -110,7 +116,7 @@ export function sampleBackground(background: Background, sample: BackgroundSampl
     const colorBack = background.parameters?.colorBack;
     return typeof colorBack === "string" ? colorBack : NEURO_NOISE_DEFAULT_COLORS.back;
   }
-  const radians = background.angle * Math.PI / 180;
+  const radians = (background.angle * Math.PI) / 180;
   const dx = Math.sin(radians);
   const dy = -Math.cos(radians);
   const width = Math.max(1, sample.width);
@@ -122,11 +128,7 @@ export function sampleBackground(background: Background, sample: BackgroundSampl
   return interpolateOklab(background.from, background.to, amount);
 }
 
-export function deriveFolderTheme(
-  background: Background,
-  foreground: string,
-  sample: BackgroundSample = { x: 0.5, y: 0.5, width: 1, height: 1 }
-): FolderTheme {
+export function deriveFolderTheme(background: Background, foreground: string, sample: BackgroundSample = { x: 0.5, y: 0.5, width: 1, height: 1 }): FolderTheme {
   if (background.type === "dynamic") {
     const lightText = luminance(foreground) >= 0.45;
     return {

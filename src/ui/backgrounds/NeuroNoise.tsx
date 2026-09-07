@@ -1,11 +1,5 @@
 import { useLayoutEffect, useRef, type ReactElement } from "react";
-import {
-  ShaderFitOptions,
-  ShaderMount,
-  getShaderColorFromString,
-  neuroNoiseFragmentShader,
-  type ShaderMountUniforms
-} from "@paper-design/shaders";
+import { ShaderFitOptions, ShaderMount, getShaderColorFromString, neuroNoiseFragmentShader, type ShaderMountUniforms } from "@paper-design/shaders";
 import { NEURO_NOISE_DEFAULT_COLORS } from "../../shared/dynamicEffects";
 import { boundedCanvasSize } from "./canvasSizing";
 
@@ -61,11 +55,7 @@ function buildNeuroUniforms(settings: NeuroRuntimeSettings): ShaderMountUniforms
   };
 }
 
-export function NeuroNoise({
-  className = "dynamic-background",
-  speed = 10,
-  parameters
-}: NeuroNoiseProps): ReactElement {
+export function NeuroNoise({ className = "dynamic-background", speed = 10, parameters }: NeuroNoiseProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const shaderRef = useRef<ShaderMount | null>(null);
   const globalSpeed = clamp(speed, 0, 4);

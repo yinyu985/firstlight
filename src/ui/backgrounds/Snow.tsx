@@ -249,11 +249,7 @@ export function resolveSnowSettings(speed = 1.35, parameters: SnowParameters = {
 export function snowColor(hex: string, fallback = "#ffffff"): [number, number, number] {
   const valid = /^#[0-9a-f]{6}$/i.test(hex) ? hex : fallback;
   const resolved = /^#[0-9a-f]{6}$/i.test(valid) ? valid : "#ffffff";
-  return [
-    Number.parseInt(resolved.slice(1, 3), 16) / 255,
-    Number.parseInt(resolved.slice(3, 5), 16) / 255,
-    Number.parseInt(resolved.slice(5, 7), 16) / 255
-  ];
+  return [Number.parseInt(resolved.slice(1, 3), 16) / 255, Number.parseInt(resolved.slice(3, 5), 16) / 255, Number.parseInt(resolved.slice(5, 7), 16) / 255];
 }
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader | null {
@@ -417,7 +413,7 @@ export function Snow({ className = "dynamic-background", from = "#ffffff", speed
       gl.uniform1f(uniforms.gamma, settings.gamma);
       gl.uniform1f(uniforms.density, settings.density);
       gl.uniform1f(uniforms.variant, variantUniform(settings.variant));
-      gl.uniform1f(uniforms.direction, settings.direction * Math.PI / 180);
+      gl.uniform1f(uniforms.direction, (settings.direction * Math.PI) / 180);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       schedule();
     };

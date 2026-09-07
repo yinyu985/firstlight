@@ -106,11 +106,7 @@ export function dotGridShockImpulse(
   };
 }
 
-export function dotGridInertiaStep(
-  speed: number,
-  resistance: number,
-  deltaSeconds: number
-): { distance: number; speed: number; movingTime: number } {
+export function dotGridInertiaStep(speed: number, resistance: number, deltaSeconds: number): { distance: number; speed: number; movingTime: number } {
   const initialSpeed = Math.max(0, speed);
   const drag = Math.max(1, resistance);
   const frameTime = clampValue(deltaSeconds, 0, 1 / 20);
@@ -181,14 +177,7 @@ function advanceDotMotion(dot: Dot, deltaSeconds: number): void {
   }
 }
 
-function applyDotImpulse(
-  dot: Dot,
-  impulseX: number,
-  impulseY: number,
-  resistance: number,
-  returnDuration: number,
-  maxSpeed: number
-): void {
+function applyDotImpulse(dot: Dot, impulseX: number, impulseY: number, resistance: number, returnDuration: number, maxSpeed: number): void {
   const rawSpeed = Math.hypot(impulseX, impulseY);
   if (rawSpeed <= 0.01) return;
 
@@ -209,13 +198,7 @@ export interface DotGridProps {
   parameters?: DotGridParameters;
 }
 
-export function DotGrid({
-  className = "dynamic-background",
-  from = "#102030",
-  to = "#89f7ff",
-  speed = 10,
-  parameters
-}: DotGridProps): ReactElement {
+export function DotGrid({ className = "dynamic-background", from = "#102030", to = "#89f7ff", speed = 10, parameters }: DotGridProps): ReactElement {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
@@ -249,18 +232,10 @@ export function DotGrid({
   const baseRgb = useMemo(() => hexToRgb(baseColor), [baseColor]);
   const activeRgb = useMemo(() => hexToRgb(activeColor), [activeColor]);
 
-  const {
-    speedScale,
-    dotSize,
-    gap,
-    proximity,
-    speedTrigger,
-    shockRadius,
-    shockStrength,
-    maxSpeed,
-    resistance,
-    returnDuration
-  } = resolveDotGridSettings(speed, parameters);
+  const { speedScale, dotSize, gap, proximity, speedTrigger, shockRadius, shockStrength, maxSpeed, resistance, returnDuration } = resolveDotGridSettings(
+    speed,
+    parameters
+  );
 
   const circlePath = useMemo(() => {
     if (typeof window === "undefined" || !window.Path2D) return null;
@@ -376,12 +351,10 @@ export function DotGrid({
 
       const canvas = canvasRef.current;
       if (!canvas) {
-        schedule();
         return;
       }
       const context = canvas.getContext("2d");
       if (!context) {
-        schedule();
         return;
       }
 
@@ -396,8 +369,10 @@ export function DotGrid({
       const currentProximity = runtimeRef.current.proximity;
       const proxSq = currentProximity * currentProximity;
 
+      let moving = false;
       for (const dot of dotsRef.current) {
         advanceDotMotion(dot, deltaSeconds);
+        moving ||= dot.phase !== "idle";
         const ox = dot.cx + dot.xOffset;
         const oy = dot.cy + dot.yOffset;
         const dx = dot.cx - px;
@@ -421,7 +396,8 @@ export function DotGrid({
         context.restore();
       }
 
-      schedule();
+      if (moving) schedule();
+      else lastFrameTime = 0;
     };
 
     document.addEventListener("visibilitychange", onVisibility);
@@ -465,6 +441,7 @@ export function DotGrid({
       if (rect.width <= 0 || rect.height <= 0) return;
       state.x = event.clientX - rect.left;
       state.y = event.clientY - rect.top;
+      requestDrawRef.current?.();
 
       if (!state.lastTime) {
         state.lastTime = now;
@@ -510,6 +487,7 @@ export function DotGrid({
     };
 
     const onPointerDown = (event: PointerEvent) => {
+      requestDrawRef.current?.();
       const settings = runtimeRef.current;
       const rect = wrapper.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
@@ -533,13 +511,20 @@ export function DotGrid({
     };
     window.addEventListener("pointermove", throttledMove as EventListener, { passive: true });
     window.addEventListener("pointerdown", onPointerDown);
+    const onLeave = () => {
+      pointerRef.current.x = Number.NEGATIVE_INFINITY;
+      pointerRef.current.y = Number.NEGATIVE_INFINITY;
+      pointerRef.current.lastTime = 0;
+      requestDrawRef.current?.();
+    };
+    document.documentElement.addEventListener("pointerleave", onLeave);
 
     return () => {
       window.removeEventListener("pointermove", throttledMove as EventListener);
       window.removeEventListener("pointerdown", onPointerDown);
+      document.documentElement.removeEventListener("pointerleave", onLeave);
     };
   }, []);
-
 
   return (
     <section

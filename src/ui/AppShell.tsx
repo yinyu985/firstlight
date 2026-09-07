@@ -1,7 +1,29 @@
 import type { DynamicEffect } from "../shared/dynamicEffects";
-import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { ChevronDown, ChevronRight, Notebook, Search, Settings } from "lucide-react";
-import type { Background, BookmarkAlignment, BookmarkItem, ClockPosition, DynamicBackground as DynamicBackgroundSettings, DynamicEffectProfile, DynamicEffectProfiles, SyncedSettings, SyncNote } from "../shared/model";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent
+} from "react";
+import { Notebook, Search, Settings, X } from "lucide-react";
+import type {
+  Background,
+  BookmarkAlignment,
+  BookmarkItem,
+  ClockPosition,
+  DynamicBackground as DynamicBackgroundSettings,
+  DynamicEffectProfile,
+  DynamicEffectProfiles,
+  SyncedSettings,
+  SyncNote
+} from "../shared/model";
 import {
   type ColorParameterDefinition,
   type DynamicEffectParameterDefinition,
@@ -21,15 +43,22 @@ import {
 } from "../shared/dynamicEffects";
 import type { AppState } from "../shared/protocol";
 import { canOpenBookmark } from "../shared/url";
-import { searchBookmarks } from "./bookmarks";
+import { countBookmarkUrls as countUrls, createBookmarkIndex, searchBookmarkIndex } from "./bookmarks";
+import { Picker } from "./Picker";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { useModalIsolation } from "./useModalIsolation";
+import { VirtualItems } from "./VirtualItems";
 import { DynamicBackground } from "./DynamicBackground";
-import { deriveFolderTheme, type FolderTheme } from "./theme";
+import { deriveFolderTheme } from "./theme";
+import { localThemeVariables, useLocalPanelTheme } from "./panelTheme";
+import { FolderPopover } from "./BookmarkFolder";
+import { focusableElements } from "./focus";
 import { useClock } from "./useClock";
 import { NotesApp, type NotesAppHandle } from "./notes/NotesApp";
 
 const DiffView = lazy(() => import("./DiffView"));
 const preloadDiffView = () => {
-  void import("./DiffView");
+  void import("./DiffView").catch(() => undefined);
 };
 
 interface Props {
@@ -39,7 +68,7 @@ interface Props {
   openSetupOnLaunch?: boolean;
   onOpenBookmark: (url: string) => void;
   onSaveSettings?: (settings: SyncedSettings) => void;
-  onSaveToken?: (token: string) => void;
+  onSaveToken?: (token: string, rememberToken: boolean) => void;
   onUpload?: () => void;
   onImportBookmarks?: () => void;
   onCompareRemote?: () => void;
@@ -86,7 +115,15 @@ function fitGrid(columns: number, viewportWidth: number): GridFit {
 
 export function backgroundImageCss(background: Background): string {
   if (background.type === "solid") return "none";
-  if (background.type === "dynamic" && (background.effect === "neuroNoise" || background.effect === "lightPillar" || background.effect === "snow" || background.effect === "silk" || background.effect === "flash")) return "none";
+  if (
+    background.type === "dynamic" &&
+    (background.effect === "neuroNoise" ||
+      background.effect === "lightPillar" ||
+      background.effect === "snow" ||
+      background.effect === "silk" ||
+      background.effect === "flash")
+  )
+    return "none";
   return `linear-gradient(${background.angle}deg in oklab, ${background.from}, ${background.to})`;
 }
 
@@ -97,199 +134,7 @@ export function backgroundColorCss(background: Background): string {
   if (background.type === "dynamic" && background.effect === "snow") return SNOW_DEFAULT_COLORS.background;
   if (background.type === "dynamic" && background.effect === "silk") return background.from;
   if (background.type === "dynamic" && background.effect === "flash") return "#000000";
-  return background.type === "dynamic"
-    ? `color-mix(in oklab, ${background.from} 50%, ${background.to})`
-    : background.from;
-}
-
-function countUrls(nodes: BookmarkItem[]): number {
-  return nodes.reduce((total, node) => total + (node.url !== undefined ? 1 : countUrls(node.children ?? [])), 0);
-}
-
-function localThemeVariables(theme: FolderTheme): CSSProperties {
-  return {
-    "--folder-surface": theme.surface,
-    "--folder-border": theme.border,
-    "--folder-hover": theme.hover,
-    "--folder-shadow": theme.shadow
-  } as CSSProperties;
-}
-
-function useLocalPanelTheme(
-  ref: RefObject<HTMLElement | null>,
-  background: Background,
-  foreground: string,
-  active = true
-): FolderTheme {
-  const fallback = useMemo(
-    () => deriveFolderTheme(background, foreground),
-    [background, foreground]
-  );
-  const [theme, setTheme] = useState(fallback);
-
-  useLayoutEffect(() => {
-    setTheme(fallback);
-    if (!active || !ref.current) return;
-    const update = () => {
-      if (!ref.current) return;
-      const rect = ref.current.getBoundingClientRect();
-      const next = deriveFolderTheme(background, foreground, {
-        x: Math.max(0, Math.min(window.innerWidth, rect.left + rect.width / 2)),
-        y: Math.max(0, Math.min(window.innerHeight, rect.top + rect.height / 2)),
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
-      setTheme((current) => (
-        current.surface === next.surface && current.border === next.border && current.hover === next.hover && current.shadow === next.shadow
-          ? current
-          : next
-      ));
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(ref.current);
-    window.addEventListener("resize", update);
-    document.addEventListener("scroll", update, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-      document.removeEventListener("scroll", update, true);
-    };
-  }, [active, background, fallback, foreground, ref]);
-
-  return theme;
-}
-
-interface FolderListProps {
-  nodes: BookmarkItem[];
-  onOpen: (item: BookmarkItem) => void;
-  showDetails: boolean;
-}
-
-function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
-  const [expanded, setExpanded] = useState<Set<BookmarkItem>>(() => new Set());
-  if (!nodes.length) return <div className="folder-empty">EMPTY</div>;
-  return <div className="folder-list">
-    {nodes.map((item, index) => {
-      const isFolder = item.children !== undefined;
-      const isExpanded = expanded.has(item);
-      return <div
-        className={`folder-entry ${isExpanded ? "is-expanded" : ""}`}
-        key={`${item.title}-${index}`}
-      >
-        <button
-          className={`folder-row ${isFolder ? "is-folder" : ""}`}
-          disabled={!isFolder && item.url !== undefined && !canOpenBookmark(item.url)}
-          aria-expanded={isFolder ? isExpanded : undefined}
-          onClick={() => {
-            if (isFolder) {
-              setExpanded((current) => {
-                const next = new Set(current);
-                if (next.has(item)) next.delete(item); else next.add(item);
-                return next;
-              });
-            } else onOpen(item);
-          }}
-        >
-          <span className="folder-row-content">
-            {isFolder && <span className="row-mark" aria-hidden="true">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>}
-            <span className="row-title">{item.title || "UNTITLED"}</span>
-            {isFolder && showDetails && <span className="row-count">{countUrls(item.children ?? [])}</span>}
-          </span>
-        </button>
-        {isFolder && isExpanded && <FolderList nodes={item.children ?? []} onOpen={onOpen} showDetails={showDetails} />}
-      </div>;
-    })}
-  </div>;
-}
-
-const FOLDER_SCROLLBAR_INSET = 2;
-const FOLDER_SCROLLBAR_MAX_LENGTH = 20;
-
-interface FolderScrollbarState {
-  visible: boolean;
-  offset: number;
-  length: number;
-}
-
-function folderScrollbarState(element: HTMLDivElement): FolderScrollbarState {
-  const scrollRange = element.scrollHeight - element.clientHeight;
-  const trackLength = Math.max(0, element.clientHeight - FOLDER_SCROLLBAR_INSET * 2);
-  const length = Math.min(FOLDER_SCROLLBAR_MAX_LENGTH, trackLength);
-  const travel = Math.max(0, trackLength - length);
-  return {
-    visible: scrollRange > 1 && length > 0,
-    offset: scrollRange > 0 ? (element.scrollTop / scrollRange) * travel : 0,
-    length
-  };
-}
-
-function FolderPopover({ nodes, onOpen, background, foreground, showDetails }: { nodes: BookmarkItem[]; onOpen: (item: BookmarkItem) => void; background: Background; foreground: string; showDetails: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
-  const [maxHeight, setMaxHeight] = useState(240);
-  const [scrollbar, setScrollbar] = useState<FolderScrollbarState>({ visible: false, offset: 0, length: FOLDER_SCROLLBAR_MAX_LENGTH });
-  const theme = useLocalPanelTheme(ref, background, foreground);
-  useLayoutEffect(() => {
-    const fit = () => {
-      if (!ref.current) return;
-      const top = ref.current.getBoundingClientRect().top;
-      setMaxHeight(Math.max(72, window.innerHeight - top - 14));
-    };
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, []);
-  useLayoutEffect(() => {
-    const scrollArea = scrollRef.current;
-    if (!scrollArea) return;
-    const update = () => setScrollbar(folderScrollbarState(scrollArea));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(scrollArea);
-    if (scrollArea.firstElementChild) observer.observe(scrollArea.firstElementChild);
-    return () => observer.disconnect();
-  }, [maxHeight, nodes]);
-
-  const dragScrollbar = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = scrollbarDragRef.current;
-    const scrollArea = scrollRef.current;
-    if (!drag || !scrollArea || drag.pointerId !== event.pointerId) return;
-    const scrollRange = scrollArea.scrollHeight - scrollArea.clientHeight;
-    const trackLength = Math.max(0, scrollArea.clientHeight - FOLDER_SCROLLBAR_INSET * 2);
-    const travel = trackLength - scrollbar.length;
-    if (travel > 0) scrollArea.scrollTop = drag.startScrollTop + ((event.clientY - drag.startY) / travel) * scrollRange;
-  };
-
-  return <div className="folder-popover" ref={ref} style={{ maxHeight, ...localThemeVariables(theme) }}>
-    <div
-      className="folder-scroll-area"
-      ref={scrollRef}
-      onScroll={(event) => setScrollbar(folderScrollbarState(event.currentTarget))}
-    >
-      <div className="folder-scroll-content">
-        <FolderList nodes={nodes} onOpen={onOpen} showDetails={showDetails} />
-      </div>
-    </div>
-    {scrollbar.visible && <div className="folder-scrollbar" aria-hidden="true">
-      <div
-        className="folder-scrollbar-thumb"
-        style={{ height: scrollbar.length, transform: `translateY(${scrollbar.offset}px)` }}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          scrollbarDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: scrollRef.current?.scrollTop ?? 0 };
-        }}
-        onPointerMove={dragScrollbar}
-        onPointerUp={(event) => {
-          if (scrollbarDragRef.current?.pointerId === event.pointerId) scrollbarDragRef.current = null;
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }}
-        onPointerCancel={() => { scrollbarDragRef.current = null; }}
-      />
-    </div>}
-  </div>;
+  return background.type === "dynamic" ? `color-mix(in oklab, ${background.from} 50%, ${background.to})` : background.from;
 }
 
 interface OptionPickerProps {
@@ -300,71 +145,35 @@ interface OptionPickerProps {
   onChange: (value: number) => void;
 }
 
-function useDismissablePicker(open: boolean, setOpen: (open: boolean) => void): RefObject<HTMLDivElement | null> {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !ref.current?.contains(event.target)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open, setOpen]);
-  return ref;
-}
-
 function OptionPicker({ value, options, suffix, label, onChange }: OptionPickerProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissablePicker(open, setOpen);
-  const menuId = useId();
-  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value} {suffix}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu" id={menuId} role="listbox" aria-label={label}>{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option}</button>)}</div>}
-  </div>;
+  return (
+    <Picker
+      value={value}
+      options={options.map((option) => ({ value: option, label: String(option) }))}
+      display={`${value} ${suffix}`}
+      label={label}
+      onChange={onChange}
+    />
+  );
 }
 
 function ClockPicker({ value, label, onChange }: { value: ClockPosition; label: string; onChange: (value: ClockPosition) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissablePicker(open, setOpen);
-  const menuId = useId();
-  const options: ClockPosition[] = ["hidden", "left", "center", "right"];
-  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu clock-menu" id={menuId} role="listbox" aria-label={label}>{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
-  </div>;
+  return <Picker value={value} options={POSITION_OPTIONS} menuClass="clock-menu" label={label} onChange={onChange} />;
 }
 
+const POSITION_OPTIONS = (["hidden", "left", "center", "right"] as const).map((value) => ({ value, label: value === "hidden" ? "HIDE" : value.toUpperCase() }));
+
 function DynamicEffectPicker({ value, onChange }: { value: DynamicEffect; onChange: (value: DynamicEffect) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissablePicker(open, setOpen);
-  const menuId = useId();
-  const effects = DYNAMIC_EFFECT_DEFINITIONS;
-  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label="动态背景动效" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{effects.find((effect) => effect.id === value)?.label ?? "SELECT"}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu effect-menu" id={menuId} role="listbox" aria-label="动态背景动效">{effects.map((effect) => {
-      return <button
-        key={effect.id}
-        role="option"
-        aria-selected={effect.id === value}
-        className={effect.id === value ? "selected" : ""}
-        disabled={!effect.implemented}
-        onClick={() => {
-          if (!effect.implemented) return;
-          onChange(effect.id);
-          setOpen(false);
-        }}
-      >
-        {effect.label}
-      </button>;
-    })}</div>}
-  </div>;
+  return (
+    <Picker
+      value={value}
+      options={DYNAMIC_EFFECT_DEFINITIONS.map((effect) => ({ value: effect.id, label: effect.label, disabled: !effect.implemented }))}
+      label="动态背景动效"
+      lang="zh-CN"
+      menuClass="effect-menu"
+      onChange={onChange}
+    />
+  );
 }
 
 function dynamicColorHint(effect: DynamicEffect): string {
@@ -395,33 +204,87 @@ function DynamicEffectRangeField({ value, spec, onChange }: { value: number; spe
   const numericValue = Number.isFinite(value) ? value : spec.defaultValue;
   const safeValue = spec.integer ? Math.round(numericValue) : numericValue;
 
-  return <div className="setting-line size-line">
-    <label><span className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</span><b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b></label>
-    <input
-      type="range"
-      aria-label={spec.label}
-      min={spec.min}
-      max={spec.max}
-      step={spec.step}
-      value={safeValue}
-      onChange={(event) => onChange(Number.parseFloat(event.target.value))}
-    />
-  </div>;
+  return (
+    <div className="setting-line size-line">
+      <label>
+        <span className="parameter-copy">
+          <span>{spec.label}</span>
+          {spec.hint && <small>{spec.hint}</small>}
+        </span>
+        <b>{spec.integer ? Math.round(safeValue) : safeValue.toFixed(2)}</b>
+      </label>
+      <input
+        type="range"
+        aria-label={spec.label}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        value={safeValue}
+        onChange={(event) => onChange(Number.parseFloat(event.target.value))}
+      />
+    </div>
+  );
 }
 
 function DynamicEffectColorField({ value, spec, onChange }: { value: string; spec: ColorParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><input aria-label={spec.label} className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
+  return (
+    <div className="setting-line">
+      <label className="parameter-copy">
+        <span>{spec.label}</span>
+        {spec.hint && <small>{spec.hint}</small>}
+      </label>
+      <input aria-label={spec.label} className="color-input" type="color" value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
 }
 
 function DynamicEffectToggleField({ value, spec, onChange }: { value: boolean; spec: ToggleParameterDefinition; onChange: (value: boolean) => void }) {
-  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><div className="segmented visibility-toggle" role="group" aria-label={spec.label}><button aria-pressed={value} className={value ? "selected" : ""} onClick={() => onChange(true)}>开</button><button aria-pressed={!value} className={!value ? "selected" : ""} onClick={() => onChange(false)}>关</button></div></div>;
+  return (
+    <div className="setting-line">
+      <label className="parameter-copy">
+        <span>{spec.label}</span>
+        {spec.hint && <small>{spec.hint}</small>}
+      </label>
+      <div className="segmented visibility-toggle" role="group" aria-label={spec.label}>
+        <button aria-pressed={value} className={value ? "selected" : ""} onClick={() => onChange(true)}>
+          开
+        </button>
+        <button aria-pressed={!value} className={!value ? "selected" : ""} onClick={() => onChange(false)}>
+          关
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function DynamicEffectSelectField({ value, spec, onChange }: { value: string; spec: SelectParameterDefinition; onChange: (value: string) => void }) {
-  return <div className="setting-line"><label className="parameter-copy"><span>{spec.label}</span>{spec.hint && <small>{spec.hint}</small>}</label><div className="segmented" role="group" aria-label={spec.label}>{spec.options.map((option) => <button key={option.value} aria-pressed={option.value === value} className={option.value === value ? "selected" : ""} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>;
+  return (
+    <div className="setting-line">
+      <label className="parameter-copy">
+        <span>{spec.label}</span>
+        {spec.hint && <small>{spec.hint}</small>}
+      </label>
+      <div className="segmented" role="group" aria-label={spec.label}>
+        {spec.options.map((option) => (
+          <button
+            key={option.value}
+            aria-pressed={option.value === value}
+            className={option.value === value ? "selected" : ""}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-function DynamicEffectParameterRows({ definitions, values, onChange }: {
+function DynamicEffectParameterRows({
+  definitions,
+  values,
+  onChange
+}: {
   definitions: readonly DynamicEffectParameterDefinition[];
   values: DynamicEffectParameters;
   onChange: (next: DynamicEffectParameters) => void;
@@ -445,55 +308,62 @@ function DynamicEffectParameterRows({ definitions, values, onChange }: {
     return typeof value === "string" && candidates.has(value) ? value : definition.defaultValue;
   };
 
-  return <>
-    {definitions.map((definition) => {
-      if (definition.hidden) return null;
-      switch (definition.kind) {
-        case DYNAMIC_EFFECT_PARAMETER_LABELS.range: {
-          const spec = definition as RangeParameterDefinition;
-          const rangeValue = validateRange(spec);
-          return <DynamicEffectRangeField
-            key={definition.key}
-            value={rangeValue}
-            spec={spec}
-            onChange={(value) => onChange({ ...values, [definition.key]: value })}
-          />;
+  return (
+    <>
+      {definitions.map((definition) => {
+        if (definition.hidden) return null;
+        switch (definition.kind) {
+          case DYNAMIC_EFFECT_PARAMETER_LABELS.range: {
+            const spec = definition as RangeParameterDefinition;
+            const rangeValue = validateRange(spec);
+            return (
+              <DynamicEffectRangeField
+                key={definition.key}
+                value={rangeValue}
+                spec={spec}
+                onChange={(value) => onChange({ ...values, [definition.key]: value })}
+              />
+            );
+          }
+          case DYNAMIC_EFFECT_PARAMETER_LABELS.color: {
+            const colorSpec = definition as ColorParameterDefinition;
+            return (
+              <DynamicEffectColorField
+                key={definition.key}
+                value={validateColor(colorSpec)}
+                spec={colorSpec}
+                onChange={(value) => onChange({ ...values, [definition.key]: value })}
+              />
+            );
+          }
+          case DYNAMIC_EFFECT_PARAMETER_LABELS.toggle: {
+            const toggleSpec = definition as ToggleParameterDefinition;
+            return (
+              <DynamicEffectToggleField
+                key={definition.key}
+                value={validateBoolean(toggleSpec)}
+                spec={toggleSpec}
+                onChange={(value) => onChange({ ...values, [definition.key]: value })}
+              />
+            );
+          }
+          case DYNAMIC_EFFECT_PARAMETER_LABELS.select: {
+            const selectSpec = definition as SelectParameterDefinition;
+            return (
+              <DynamicEffectSelectField
+                key={definition.key}
+                value={validateSelection(selectSpec)}
+                spec={selectSpec}
+                onChange={(value) => onChange({ ...values, [definition.key]: value })}
+              />
+            );
+          }
+          default:
+            return null;
         }
-        case DYNAMIC_EFFECT_PARAMETER_LABELS.color:
-        {
-          const colorSpec = definition as ColorParameterDefinition;
-          return <DynamicEffectColorField
-            key={definition.key}
-            value={validateColor(colorSpec)}
-            spec={colorSpec}
-            onChange={(value) => onChange({ ...values, [definition.key]: value })}
-          />;
-        }
-        case DYNAMIC_EFFECT_PARAMETER_LABELS.toggle:
-        {
-          const toggleSpec = definition as ToggleParameterDefinition;
-          return <DynamicEffectToggleField
-            key={definition.key}
-            value={validateBoolean(toggleSpec)}
-            spec={toggleSpec}
-            onChange={(value) => onChange({ ...values, [definition.key]: value })}
-          />;
-        }
-        case DYNAMIC_EFFECT_PARAMETER_LABELS.select:
-        {
-          const selectSpec = definition as SelectParameterDefinition;
-          return <DynamicEffectSelectField
-            key={definition.key}
-            value={validateSelection(selectSpec)}
-            spec={selectSpec}
-            onChange={(value) => onChange({ ...values, [definition.key]: value })}
-          />;
-        }
-        default:
-          return null;
-      }
-    })}
-  </>;
+      })}
+    </>
+  );
 }
 
 function normalizeDynamicAngle(angle: number): number {
@@ -559,11 +429,7 @@ function genericColorSettings(background: Background): { from: string; to: strin
   };
 }
 
-function baselineDynamicBackground(
-  from: Background,
-  effect: DynamicEffect,
-  profiles: DynamicEffectProfiles = {}
-): DynamicBackgroundSettings {
+function baselineDynamicBackground(from: Background, effect: DynamicEffect, profiles: DynamicEffectProfiles = {}): DynamicBackgroundSettings {
   const definition = getDynamicEffectDefinition(effect);
   if (from.type === "dynamic" && from.effect === effect) {
     return normalizeDynamicBackground(from);
@@ -598,17 +464,18 @@ function baselineDynamicBackground(
     };
   }
   const source = genericColorSettings(from);
-  const colors = effect === "lightPillar"
-    ? { from: LIGHT_PILLAR_DEFAULT_COLORS.top, to: LIGHT_PILLAR_DEFAULT_COLORS.bottom }
-    : effect === "galaxy"
-      ? GALAXY_DEFAULT_COLORS
-      : effect === "snow"
-        ? { from: SNOW_DEFAULT_COLORS.snow, to: SNOW_DEFAULT_COLORS.background }
-        : effect === "silk"
-          ? { from: SILK_DEFAULT_COLORS.silk, to: SILK_DEFAULT_COLORS.silk }
-          : effect === "flash"
-            ? { from: "#000000", to: "#000000" }
-            : source;
+  const colors =
+    effect === "lightPillar"
+      ? { from: LIGHT_PILLAR_DEFAULT_COLORS.top, to: LIGHT_PILLAR_DEFAULT_COLORS.bottom }
+      : effect === "galaxy"
+        ? GALAXY_DEFAULT_COLORS
+        : effect === "snow"
+          ? { from: SNOW_DEFAULT_COLORS.snow, to: SNOW_DEFAULT_COLORS.background }
+          : effect === "silk"
+            ? { from: SILK_DEFAULT_COLORS.silk, to: SILK_DEFAULT_COLORS.silk }
+            : effect === "flash"
+              ? { from: "#000000", to: "#000000" }
+              : source;
 
   return {
     type: "dynamic",
@@ -622,30 +489,32 @@ function baselineDynamicBackground(
 }
 
 function SearchTextPicker({ value, onChange }: { value: ClockPosition; onChange: (value: ClockPosition) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissablePicker(open, setOpen);
-  const menuId = useId();
-  const options: ClockPosition[] = ["hidden", "left", "center", "right"];
-  const label = value === "hidden" ? "HIDE" : value.toUpperCase();
-  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label="Search text position" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{label}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu clock-menu" id={menuId} role="listbox" aria-label="Search text position">{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option === "hidden" ? "HIDE" : option.toUpperCase()}</button>)}</div>}
-  </div>;
+  return <Picker value={value} options={POSITION_OPTIONS} label="Search text position" menuClass="clock-menu" onChange={onChange} />;
 }
 
 function AlignmentPicker({ value, onChange }: { value: BookmarkAlignment; onChange: (value: BookmarkAlignment) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismissablePicker(open, setOpen);
-  const menuId = useId();
-  const options: BookmarkAlignment[] = ["left", "center", "right"];
-  return <div className={`option-picker ${open ? "open" : ""}`} ref={ref}>
-    <button className="picker-trigger" aria-label="Bookmark alignment" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen((current) => !current)}><span>{value.toUpperCase()}</span><b className="picker-arrow" aria-hidden="true" /></button>
-    {open && <div className="picker-menu alignment-menu" id={menuId} role="listbox" aria-label="Bookmark alignment">{options.map((option) => <button key={option} role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>{option.toUpperCase()}</button>)}</div>}
-  </div>;
+  return (
+    <Picker
+      value={value}
+      options={(["left", "center", "right"] as const).map((value) => ({ value, label: value.toUpperCase() }))}
+      label="Bookmark alignment"
+      menuClass="alignment-menu"
+      onChange={onChange}
+    />
+  );
 }
 
 function VisibilityToggle({ visible, label, onChange }: { visible: boolean; label: string; onChange: (visible: boolean) => void }) {
-  return <div className="segmented visibility-toggle" role="group" aria-label={label}><button aria-pressed={visible} className={visible ? "selected" : ""} onClick={() => onChange(true)}>SHOW</button><button aria-pressed={!visible} className={!visible ? "selected" : ""} onClick={() => onChange(false)}>HIDE</button></div>;
+  return (
+    <div className="segmented visibility-toggle" role="group" aria-label={label}>
+      <button aria-pressed={visible} className={visible ? "selected" : ""} onClick={() => onChange(true)}>
+        SHOW
+      </button>
+      <button aria-pressed={!visible} className={!visible ? "selected" : ""} onClick={() => onChange(false)}>
+        HIDE
+      </button>
+    </div>
+  );
 }
 
 function useReducedMotion(): boolean {
@@ -662,9 +531,7 @@ function useReducedMotion(): boolean {
 
 function trapTabKey(event: ReactKeyboardEvent<HTMLElement>): void {
   if (event.key !== "Tab") return;
-  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )).filter((element) => !element.hasAttribute("hidden"));
+  const focusable = focusableElements(event.currentTarget);
   if (!focusable.length) {
     event.preventDefault();
     event.currentTarget.focus();
@@ -691,9 +558,10 @@ export function AppShell(props: Props) {
   const [settingsOpen, setSettingsOpen] = useState(Boolean(props.openSetupOnLaunch));
   const [openFolder, setOpenFolder] = useState<BookmarkItem | null>(null);
   const [token, setToken] = useState(state.token ?? "");
+  const [rememberToken, setRememberToken] = useState(state.rememberToken ?? false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [notesResetKey, setNotesResetKey] = useState(0);
-  const [visibleToast, setVisibleToast] = useState(() => state.toast && state.toast.expiresAt > Date.now() ? state.toast : undefined);
+  const [visibleToast, setVisibleToast] = useState(() => (state.toast && state.toast.expiresAt > Date.now() ? state.toast : undefined));
   const [dismissedDiffKey, setDismissedDiffKey] = useState<string>();
   const [showSyncNotice, setShowSyncNotice] = useState(false);
   const [gridFit, setGridFit] = useState(() => fitGrid(state.settings.layout.columns, window.innerWidth));
@@ -704,24 +572,25 @@ export function AppShell(props: Props) {
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const settingsDrawerRef = useRef<HTMLElement>(null);
   const [contentBounds, setContentBounds] = useState<{ left: number; width: number }>();
-  const results = useMemo(() => searchBookmarks(state.bookmarks, query), [state.bookmarks, query]);
+  const bookmarkIndex = useMemo(() => createBookmarkIndex(state.bookmarks), [state.bookmarks]);
+  const deferredQuery = useDeferredValue(query);
+  const { results, truncated } = useMemo(() => searchBookmarkIndex(bookmarkIndex, deferredQuery), [bookmarkIndex, deferredQuery]);
   const readonly = state.target === "online";
   const searchPosition = state.settings.features.searchPosition;
   const searchText = state.settings.features.searchText;
+  const resultAlignment = searchText === "hidden" ? searchPosition : searchText;
   const folderTheme = useMemo(
     () => deriveFolderTheme(state.settings.background, state.settings.foreground.color),
     [state.settings.background, state.settings.foreground.color]
   );
-  const activeBackground = state.settings.background.type === "dynamic"
-    ? normalizeDynamicBackground(state.settings.background)
-    : state.settings.background;
-  const remoteOperationActive = state.tokenConfigured && (
-    state.sync.phase === "uploading" || state.sync.phase === "discovering" || state.sync.phase === "restoring"
-  );
+  const activeBackground = state.settings.background.type === "dynamic" ? normalizeDynamicBackground(state.settings.background) : state.settings.background;
+  const remoteOperationActive =
+    state.tokenConfigured && (state.sync.phase === "uploading" || state.sync.phase === "discovering" || state.sync.phase === "restoring");
   const notificationMessage = showSyncNotice ? state.sync.message : visibleToast?.message;
   const hasNotification = Boolean(notificationMessage);
   const diffKey = state.diff?.id;
   const visibleDiff = state.diff && diffKey !== dismissedDiffKey ? state.diff : undefined;
+  useModalIsolation(visibleDiff ? "diff" : settingsOpen ? "settings" : noteOpen ? "notes" : undefined);
   const busy = Boolean(props.busy);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -733,19 +602,17 @@ export function AppShell(props: Props) {
     state.settings.foreground.color,
     searchPosition !== "hidden" && Boolean(query) && searchResultsOpen
   );
-  const syncToastTheme = useLocalPanelTheme(
-    syncToastRef,
-    state.settings.background,
-    state.settings.foreground.color,
-    hasNotification
-  );
+  const syncToastTheme = useLocalPanelTheme(syncToastRef, state.settings.background, state.settings.foreground.color, hasNotification);
   useEffect(() => {
     if (props.openSetupOnLaunch) setSettingsOpen(true);
   }, [props.openSetupOnLaunch]);
 
   useEffect(() => {
     if (!settingsOpen) return;
-    const frame = window.requestAnimationFrame(() => settingsDrawerRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => {
+      const drawer = settingsDrawerRef.current;
+      if (drawer && !drawer.contains(document.activeElement)) drawer.focus();
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [settingsOpen]);
 
@@ -770,15 +637,13 @@ export function AppShell(props: Props) {
   }, [state.settings.layout.rows, state.settings.layout.columns]);
 
   useEffect(() => {
-    setOpenFolder((current) => current && state.bookmarks.includes(current) ? current : null);
+    setOpenFolder((current) => (current && state.bookmarks.includes(current) ? current : null));
   }, [state.bookmarks]);
 
   useLayoutEffect(() => {
     const fit = () => {
       const next = fitGrid(state.settings.layout.columns, window.innerWidth);
-      setGridFit((current) => (
-        current.columns === next.columns && current.columnWidth === next.columnWidth && current.gap === next.gap ? current : next
-      ));
+      setGridFit((current) => (current.columns === next.columns && current.columnWidth === next.columnWidth && current.gap === next.gap ? current : next));
     };
     fit();
     window.addEventListener("resize", fit);
@@ -787,7 +652,8 @@ export function AppShell(props: Props) {
 
   useEffect(() => {
     setToken(state.token ?? "");
-  }, [state.token]);
+    setRememberToken(state.rememberToken ?? false);
+  }, [state.token, state.rememberToken]);
 
   useEffect(() => {
     if (!state.diff) setDismissedDiffKey(undefined);
@@ -804,14 +670,17 @@ export function AppShell(props: Props) {
       return;
     }
     setVisibleToast(notice);
-    const timer = window.setTimeout(() => {
-      setVisibleToast((current) => current?.id === notice.id ? undefined : current);
-    }, Math.max(0, notice.expiresAt - Date.now()));
+    const timer = window.setTimeout(
+      () => {
+        setVisibleToast((current) => (current?.id === notice.id ? undefined : current));
+      },
+      Math.max(0, notice.expiresAt - Date.now())
+    );
     return () => window.clearTimeout(timer);
-  }, [state.toast?.id, state.toast?.expiresAt]);
+  }, [state.toast]);
 
   useEffect(() => {
-  const closeDetachedLists = (event: PointerEvent) => {
+    const closeDetachedLists = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!target.closest(".search-shell, .search-results")) setSearchResultsOpen(false);
@@ -819,7 +688,7 @@ export function AppShell(props: Props) {
       if (!target.closest(".status-dock") && !target.closest(".notes-window")) setNoteOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       setSearchResultsOpen(false);
       setOpenFolder(null);
       setNoteOpen(false);
@@ -857,7 +726,10 @@ export function AppShell(props: Props) {
     observer.observe(grid);
     for (const content of grid.querySelectorAll<HTMLElement>(".cell-content")) observer.observe(content);
     window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [gridFit, searchResultsOpen, state.bookmarks, state.settings.foreground.fontSize, state.settings.layout.columns, state.settings.layout.rows]);
 
   const open = (item: BookmarkItem) => {
@@ -875,9 +747,7 @@ export function AppShell(props: Props) {
     }
     updateSettings({ ...state.settings, background: nextBackground, dynamicEffectProfiles });
   };
-  const updateGradientBackground = (
-    patch: Partial<Omit<Extract<Background, { type: "gradient" }>, "type">>
-  ) => {
+  const updateGradientBackground = (patch: Partial<Omit<Extract<Background, { type: "gradient" }>, "type">>) => {
     const current = state.settings.background;
     if (current.type !== "gradient") return;
     setBackground({ ...current, ...patch });
@@ -886,31 +756,43 @@ export function AppShell(props: Props) {
   const gridWidth = gridFit.columns * gridFit.columnWidth + (gridFit.columns - 1) * gridFit.gap;
   const modeColorSettings = genericColorSettings(state.settings.background);
   const contentFrameStyle = contentBounds ? { width: contentBounds.width, marginLeft: contentBounds.left } : undefined;
-  const searchResultStyle = contentBounds ? {
-    width: contentBounds.width / 2,
-    marginLeft: contentBounds.left + (searchText === "center" ? contentBounds.width / 4 : searchText === "right" ? contentBounds.width / 2 : 0)
-  } : undefined;
+  const searchResultStyle = contentBounds
+    ? {
+        width: contentBounds.width / 2,
+        marginLeft: contentBounds.left + (resultAlignment === "center" ? contentBounds.width / 4 : resultAlignment === "right" ? contentBounds.width / 2 : 0)
+      }
+    : undefined;
 
   return (
-    <main className={`app theme-${state.settings.features.themeMode} bookmarks-${state.settings.layout.bookmarkAlignment} hover-${state.settings.features.hoverStyle} ${activeBackground.type === "dynamic" ? "background-dynamic" : ""}`} style={{
-      backgroundColor: backgroundColorCss(activeBackground),
-      backgroundImage: backgroundImageCss(activeBackground),
-      color: state.settings.foreground.color,
-      "--foreground-color": state.settings.foreground.color,
-      "--bookmark-font-size": `${state.settings.foreground.fontSize}px`,
-      "--ui-font-size": `${state.settings.foreground.fontSize}px`,
-      "--theme-color": state.settings.features.themeColor,
-      "--grid-columns": gridFit.columns,
-      "--grid-rows": state.settings.layout.rows,
-      "--grid-width": `${gridWidth}px`,
-      "--grid-column-width": `${gridFit.columnWidth}px`,
-      "--grid-column-gap": `${gridFit.gap}px`,
-      "--folder-surface": folderTheme.surface,
-      "--folder-border": folderTheme.border,
-      "--folder-hover": folderTheme.hover,
-      "--folder-shadow": folderTheme.shadow
-    } as CSSProperties} onClick={() => setOpenFolder(null)}>
-      {activeBackground.type === "dynamic" && !reducedMotion && <DynamicBackground background={activeBackground} />}
+    <main
+      className={`app theme-${state.settings.features.themeMode} bookmarks-${state.settings.layout.bookmarkAlignment} hover-${state.settings.features.hoverStyle} ${activeBackground.type === "dynamic" ? "background-dynamic" : ""}`}
+      style={
+        {
+          backgroundColor: backgroundColorCss(activeBackground),
+          backgroundImage: backgroundImageCss(activeBackground),
+          color: state.settings.foreground.color,
+          "--foreground-color": state.settings.foreground.color,
+          "--bookmark-font-size": `${state.settings.foreground.fontSize}px`,
+          "--ui-font-size": `${state.settings.foreground.fontSize}px`,
+          "--theme-color": state.settings.features.themeColor,
+          "--grid-columns": gridFit.columns,
+          "--grid-rows": state.settings.layout.rows,
+          "--grid-width": `${gridWidth}px`,
+          "--grid-column-width": `${gridFit.columnWidth}px`,
+          "--grid-column-gap": `${gridFit.gap}px`,
+          "--folder-surface": folderTheme.surface,
+          "--folder-border": folderTheme.border,
+          "--folder-hover": folderTheme.hover,
+          "--folder-shadow": folderTheme.shadow
+        } as CSSProperties
+      }
+      onClick={() => setOpenFolder(null)}
+    >
+      {activeBackground.type === "dynamic" && !reducedMotion && (
+        <ErrorBoundary key={activeBackground.effect} name="Background" silent>
+          <DynamicBackground background={activeBackground} />
+        </ErrorBoundary>
+      )}
       <div className="scanlines" />
 
       <div
@@ -933,188 +815,708 @@ export function AppShell(props: Props) {
         >
           <Notebook className="note-icon" size={20} strokeWidth={1.8} aria-hidden="true" />
         </button>
-        {hasNotification && <span className="sync-toast" role="status">{notificationMessage}</span>}
+        {hasNotification && (
+          <span className="sync-toast" role="status">
+            {notificationMessage}
+          </span>
+        )}
       </div>
-      {noteOpen && <NotesApp
-        ref={notesAppRef}
-        initialNotes={state.notes}
-        onSave={props.onSaveNotes}
-        readonly={readonly}
-        externalResetKey={notesResetKey}
-      />}
+      {noteOpen && (
+        <ErrorBoundary name="Notes" onClose={() => setNoteOpen(false)}>
+          <NotesApp ref={notesAppRef} initialNotes={state.notes} onSave={props.onSaveNotes} readonly={readonly} externalResetKey={notesResetKey} />
+        </ErrorBoundary>
+      )}
 
       <section className="center-stage" onClick={(event) => event.stopPropagation()}>
-        {state.settings.clockPosition !== "hidden" && <header className={`topline clock-${state.settings.clockPosition}`} style={contentFrameStyle}><time>{clock}</time></header>}
+        {state.settings.clockPosition !== "hidden" && (
+          <header className={`topline clock-${state.settings.clockPosition}`} style={contentFrameStyle}>
+            <time>{clock}</time>
+          </header>
+        )}
 
-        {searchPosition !== "hidden" && <div className={`search-shell search-${searchPosition}`} style={contentFrameStyle}><label className={`search-box search-text-${state.settings.features.searchText}`}>
-          {state.settings.features.searchIcon && <span className="search-prefix"><Search size={20} strokeWidth={1.8} /></span>}
-          <input
-            value={query}
-            onFocus={() => { if (query) setSearchResultsOpen(true); }}
-            onChange={(event) => { setQuery(event.target.value); setSearchResultsOpen(Boolean(event.target.value)); setOpenFolder(null); }}
-            placeholder={state.settings.features.searchText === "hidden" ? "" : "SEARCH BOOKMARKS"}
-            aria-label="Search bookmarks"
-            autoComplete="off"
-          />
-          {query && <button onClick={() => { setQuery(""); setSearchResultsOpen(false); }} aria-label="Clear search">×</button>}
-        </label></div>}
-
-        {searchText !== "hidden" && query && searchResultsOpen ? <div ref={searchResultsRef} className={`search-results search-text-${searchText}`} style={{ ...searchResultStyle, ...localThemeVariables(searchResultsTheme) }}>
-          {results.length ? <>{results.map((result, index) => (
-            <button key={`${result.path}-${result.item.title}-${index}`} className="search-row" disabled={!canOpenBookmark(result.item.url)} onClick={() => open(result.item)}>
-              <span>{result.item.title || result.item.url}</span>
-            </button>
-          ))}</> : <div className="empty">NO RESULTS</div>}
-        </div> : <><div className="bookmark-table" ref={gridRef}>
-          {state.bookmarks.length ? state.bookmarks.map((item, index) => {
-            const folder = item.children !== undefined;
-            const active = openFolder === item;
-            return <div className={`bookmark-cell-wrap ${active ? "active" : ""}`} key={`${item.title}-${index}`}>
-              <button
-                className="bookmark-cell"
-                disabled={!folder && item.url !== undefined && !canOpenBookmark(item.url)}
-                aria-expanded={folder ? active : undefined}
-                onClick={() => folder ? setOpenFolder(active ? null : item) : open(item)}
-              >
-                <span className="cell-content">
-                  <span className="cell-name">{item.title || "UNTITLED"}</span>
-                  {state.settings.features.bookmarkDetails && <span className={`cell-kind ${folder ? "cell-count" : "cell-link"}`}>{folder ? countUrls(item.children ?? []) : "↗"}</span>}
+        {searchPosition !== "hidden" && (
+          <div className={`search-shell search-${searchPosition}`} style={contentFrameStyle}>
+            <label className={`search-box search-text-${state.settings.features.searchText}`}>
+              {state.settings.features.searchIcon && (
+                <span className="search-prefix">
+                  <Search size={20} strokeWidth={1.8} />
                 </span>
-              </button>
-              {folder && active && <FolderPopover nodes={item.children ?? []} onOpen={open} background={state.settings.background} foreground={state.settings.foreground.color} showDetails={state.settings.features.bookmarkDetails} />}
-            </div>;
-          }) : <div className="empty table-empty">BOOKMARK BAR IS EMPTY</div>}
-        </div></>}
-      </section>
+              )}
+              <input
+                value={query}
+                onFocus={() => {
+                  if (query) setSearchResultsOpen(true);
+                }}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setSearchResultsOpen(Boolean(event.target.value));
+                  setOpenFolder(null);
+                }}
+                placeholder={state.settings.features.searchText === "hidden" ? "" : "SEARCH BOOKMARKS"}
+                aria-label="Search bookmarks"
+                autoComplete="off"
+              />
+              {query && (
+                <button
+                  onClick={() => {
+                    setQuery("");
+                    setSearchResultsOpen(false);
+                  }}
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </label>
+          </div>
+        )}
 
-      <button ref={settingsTriggerRef} className="settings-trigger" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }} aria-label="Open settings" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-controls="settings-drawer"><Settings size={20} strokeWidth={1.8} /></button>
-
-      {settingsOpen && <><div className="drawer-backdrop" aria-hidden="true" onClick={closeSettings} />
-      <aside id="settings-drawer" ref={settingsDrawerRef} className="settings-drawer open" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onKeyDown={trapTabKey} onClick={(event) => event.stopPropagation()}>
-        <header className="drawer-header"><span id="settings-title" className="brand-lockup"><img src="./firstlight-mark.png" alt="" />FIRSTLIGHT</span></header>
-        <div className="drawer-content">
-          <section className="settings-section">
-            <div className="section-title"><span>BOOKMARKS</span>{!readonly && <button disabled={busy} onClick={props.onOpenBookmarkManager}>OPEN MANAGER ↗</button>}</div>
-            <div className="setting-line"><label>Open target</label><div className="segmented" role="group" aria-label="Open target"><button aria-pressed={state.settings.openTarget === "new-tab"} className={state.settings.openTarget === "new-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "new-tab" })}>NEW TAB</button><button aria-pressed={state.settings.openTarget === "current-tab"} className={state.settings.openTarget === "current-tab" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, openTarget: "current-tab" })}>CURRENT</button></div></div>
-            {!readonly && <div className="setting-line"><label>Chrome import</label><button aria-label="Import Chrome bookmarks" className="inline-action" disabled={busy} onClick={props.onImportBookmarks}>IMPORT</button></div>}
-          </section>
-
-          <section className="settings-section">
-            <div className="section-title"><span>BACKGROUND</span></div>
-            <div className="setting-line"><label>Mode</label><div className="segmented" role="group" aria-label="Background mode"><button aria-pressed={state.settings.background.type === "solid"} className={state.settings.background.type === "solid" ? "selected" : ""} onClick={() => setBackground({ type: "solid", color: modeColorSettings.from })}>SOLID</button><button aria-pressed={state.settings.background.type === "gradient"} className={state.settings.background.type === "gradient" ? "selected" : ""} onClick={() => setBackground({ type: "gradient", ...modeColorSettings })}>GRADIENT</button><button aria-pressed={state.settings.background.type === "dynamic"} className={state.settings.background.type === "dynamic" ? "selected" : ""} onClick={() => setBackground(baselineDynamicBackground(state.settings.background, state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow", state.settings.dynamicEffectProfiles))}>DYNAMIC</button></div></div>
-            {state.settings.background.type === "solid" ? (
-              <div className="setting-line"><label>Color</label><input aria-label="Background color" className="color-input" type="color" value={state.settings.background.color} onChange={(event) => setBackground({ type: "solid", color: event.target.value })} /></div>
-            ) : activeBackground.type === "dynamic" ? (
-              (() => {
-                const dynamicBackground = activeBackground;
-                const effectDefinition = getDynamicEffectDefinition(dynamicBackground.effect);
-                const parameters = normalizeDynamicParameters(dynamicBackground.effect, dynamicBackground.parameters);
-                const speedLabel = effectDefinition.speed.label ?? "动画速度";
-                return <>
-                  <div className="setting-line"><label>动效</label><DynamicEffectPicker
-                    value={dynamicBackground.effect}
-                    onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
-                  /></div>
-                  {dynamicBackground.effect === "snow" || dynamicBackground.effect === "silk" ? <div className="setting-line"><label className="parameter-copy"><span>{dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"}</span><small>{dynamicBackground.effect === "snow" ? "控制所有雪花使用的颜色" : "控制整片丝绸流光使用的主色"}</small></label><input aria-label={dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"} className="color-input" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value, to: dynamicBackground.effect === "silk" ? event.target.value : dynamicBackground.to })} /></div> : dynamicBackgroundHasColorControls(dynamicBackground) && <div className="setting-line"><label className="parameter-copy"><span>动效颜色</span><small>{dynamicColorHint(dynamicBackground.effect)}</small></label><div className="color-pair" role="group" aria-label="动效颜色"><input aria-label="第一种动效颜色" type="color" value={dynamicBackground.from} onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })} /><input aria-label="第二种动效颜色" type="color" value={dynamicBackground.to} onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })} /></div></div>}
-                  {dynamicBackground.effect !== "neuroNoise" && effectDefinition.supportsAngle && <div className="setting-line angle-line size-line"><label><span className="parameter-copy"><span>流动方向</span><small>旋转整个颜色场的运动方向</small></span><b>{dynamicBackground.angle}°</b></label><input aria-label="动效流动方向" type="range" min="0" max="360" value={dynamicBackground.angle} onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })} /></div>}
-                  <div className="setting-line size-line speed-line">
-                    <label><span className="parameter-copy"><span>{speedLabel}</span>{effectDefinition.speed.hint && <small>{effectDefinition.speed.hint}</small>}</span><b>{dynamicBackground.speed}</b></label>
-                    <input
-                      type="range"
-                      aria-label={speedLabel}
-                      min={effectDefinition.speed.min}
-                      max={effectDefinition.speed.max}
-                      step={effectDefinition.speed.step}
-                      value={dynamicBackground.speed}
-                      onChange={(event) => setBackground({ ...dynamicBackground, speed: Number(event.target.value) })}
-                    />
-                  </div>
-                  <DynamicEffectParameterRows
-                    definitions={effectDefinition.parameters}
-                    values={parameters}
-                    onChange={(nextParameters) => setBackground({ ...dynamicBackground, parameters: nextParameters })}
-                  />
-                </>;
-              })()
+        {searchPosition !== "hidden" && query.trim() && searchResultsOpen ? (
+          <div
+            ref={searchResultsRef}
+            className={`search-results search-text-${resultAlignment}`}
+            aria-busy={query !== deferredQuery}
+            style={{ ...searchResultStyle, ...localThemeVariables(searchResultsTheme) }}
+          >
+            {results.length ? (
+              <>
+                {results.map((result, index) => (
+                  <button
+                    key={`${result.path}-${result.item.title}-${index}`}
+                    className="search-row"
+                    title={`${result.path} / ${result.item.title}`}
+                    aria-label={`${result.item.title || "Untitled"} — ${result.path}`}
+                    disabled={!canOpenBookmark(result.item.url)}
+                    onClick={() => open(result.item)}
+                  >
+                    <span>{result.item.title || result.item.url}</span>
+                  </button>
+                ))}
+              </>
             ) : (
-              <div>
-                <div className="setting-line"><label>Colors</label><div className="color-pair" role="group" aria-label="Gradient colors"><input aria-label="Gradient start color" type="color" value={modeColorSettings.from} onChange={(event) => updateGradientBackground({ from: event.target.value })} /><input aria-label="Gradient end color" type="color" value={modeColorSettings.to} onChange={(event) => updateGradientBackground({ to: event.target.value })} /></div></div>
-                <div className="setting-line angle-line"><label>Angle <b>{modeColorSettings.angle}°</b></label><input aria-label="Gradient angle" type="range" min="0" max="360" value={modeColorSettings.angle} onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })} /></div>
+              <div className="empty">NO RESULTS</div>
+            )}
+            {truncated && (
+              <div className="empty" role="status">
+                FIRST 80 MATCHES — REFINE YOUR SEARCH
               </div>
             )}
-          </section>
+          </div>
+        ) : (
+          <VirtualItems
+            className="bookmark-table"
+            hostRef={gridRef}
+            items={state.bookmarks}
+            columns={gridFit.columns}
+            columnWidth={gridFit.columnWidth}
+            columnGap={gridFit.gap}
+            minimumRows={state.settings.layout.rows}
+            rowHeight={Math.max(34, state.settings.foreground.fontSize + 22) + 1}
+            empty={<div className="empty table-empty">{readonly && state.sync.phase !== "synced" ? state.sync.message : "BOOKMARK BAR IS EMPTY"}</div>}
+            renderItem={(item, index) => {
+              const folder = item.children !== undefined;
+              const active = openFolder === item;
+              return (
+                <div className={`bookmark-cell-wrap ${active ? "active" : ""}`} key={`${item.title}-${index}`}>
+                  <button
+                    className="bookmark-cell"
+                    disabled={!folder && item.url !== undefined && !canOpenBookmark(item.url)}
+                    aria-expanded={folder ? active : undefined}
+                    onClick={() => (folder ? setOpenFolder(active ? null : item) : open(item))}
+                  >
+                    <span className="cell-content">
+                      <span className="cell-name">{item.title || "UNTITLED"}</span>
+                      {state.settings.features.bookmarkDetails && (
+                        <span className={`cell-kind ${folder ? "cell-count" : "cell-link"}`}>{folder ? countUrls(item.children ?? []) : "↗"}</span>
+                      )}
+                    </span>
+                  </button>
+                  {folder && active && (
+                    <FolderPopover
+                      nodes={item.children ?? []}
+                      onOpen={open}
+                      background={state.settings.background}
+                      foreground={state.settings.foreground.color}
+                      showDetails={state.settings.features.bookmarkDetails}
+                    />
+                  )}
+                </div>
+              );
+            }}
+          />
+        )}
+      </section>
 
-          <section className="settings-section">
-            <div className="section-title"><span>FOREGROUND</span></div>
-            <div className="setting-line"><label>Theme</label><div className="segmented" role="group" aria-label="Interface theme"><button aria-pressed={state.settings.features.themeMode === "dark"} className={state.settings.features.themeMode === "dark" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}>DARK</button><button aria-pressed={state.settings.features.themeMode === "light"} className={state.settings.features.themeMode === "light" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}>LIGHT</button></div></div>
-            <div className="setting-line"><label>Text color</label><input aria-label="Text color" className="color-input" type="color" value={state.settings.foreground.color} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, color: event.target.value } })} /></div>
-            <div className="setting-line"><label>Theme color</label><input aria-label="Theme color" className="color-input" type="color" value={state.settings.features.themeColor} onChange={(event) => updateSettings({ ...state.settings, features: { ...state.settings.features, themeColor: event.target.value } })} /></div>
-            <div className="setting-line size-line"><label>Text size <b>{state.settings.foreground.fontSize}px</b></label><input aria-label="Text size" type="range" min="12" max="24" step="1" value={state.settings.foreground.fontSize} onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, fontSize: Number(event.target.value) } })} /></div>
-            <div className="setting-line"><label>Clock</label><ClockPicker label="Clock position" value={state.settings.clockPosition} onChange={(clockPosition) => updateSettings({ ...state.settings, clockPosition })} /></div>
-            <div className="setting-line"><label>Clock seconds</label><VisibilityToggle label="Clock seconds" visible={state.settings.features.clockSeconds} onChange={(clockSeconds) => updateSettings({ ...state.settings, features: { ...state.settings.features, clockSeconds } })} /></div>
-          </section>
+      <button
+        ref={settingsTriggerRef}
+        className="settings-trigger"
+        onClick={(event) => {
+          event.stopPropagation();
+          setSettingsOpen(true);
+        }}
+        aria-label="Open settings"
+        aria-haspopup="dialog"
+        aria-expanded={settingsOpen}
+        aria-controls="settings-drawer"
+      >
+        <Settings size={20} strokeWidth={1.8} />
+      </button>
 
-          <section className="settings-section">
-            <div className="section-title"><span>HOME GRID</span><i>{state.settings.layout.rows} × {state.settings.layout.columns}</i></div>
-            <div className="setting-line"><label>Rows</label><OptionPicker label="Home grid rows" value={state.settings.layout.rows} options={[1, 2, 3, 4, 5, 6, 7, 8]} suffix="ROWS" onChange={(rows) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, rows } })} /></div>
-            <div className="setting-line"><label>Columns</label><OptionPicker label="Home grid columns" value={state.settings.layout.columns} options={[2, 3, 4, 5, 6, 7, 8]} suffix="COLS" onChange={(columns) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, columns } })} /></div>
-            <div className="setting-line"><label>Bookmark alignment</label><AlignmentPicker value={state.settings.layout.bookmarkAlignment} onChange={(bookmarkAlignment) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, bookmarkAlignment } })} /></div>
-            <div className="setting-line"><label>Bookmark details</label><VisibilityToggle label="Bookmark details" visible={state.settings.features.bookmarkDetails} onChange={(bookmarkDetails) => updateSettings({ ...state.settings, features: { ...state.settings.features, bookmarkDetails } })} /></div>
-            <div className="setting-line"><label>Hover highlight</label><div className="segmented" role="group" aria-label="Hover highlight"><button aria-pressed={state.settings.features.hoverStyle === "underline"} className={state.settings.features.hoverStyle === "underline" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "underline" } })}>LINE</button><button aria-pressed={state.settings.features.hoverStyle === "box"} className={state.settings.features.hoverStyle === "box" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "box" } })}>BOX</button><button aria-pressed={state.settings.features.hoverStyle === "block"} className={state.settings.features.hoverStyle === "block" ? "selected" : ""} onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "block" } })}>BLOCK</button></div></div>
-            <div className="setting-line"><label>Search</label><ClockPicker label="Search position" value={state.settings.features.searchPosition} onChange={(searchPosition) => { if (searchPosition === "hidden") { setQuery(""); setSearchResultsOpen(false); } updateSettings({ ...state.settings, features: { ...state.settings.features, searchPosition } }); }} /></div>
-            <div className="setting-line"><label>Search icon</label><VisibilityToggle label="Search icon" visible={state.settings.features.searchIcon} onChange={(searchIcon) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchIcon } })} /></div>
-            <div className="setting-line"><label>Search text</label><SearchTextPicker value={state.settings.features.searchText} onChange={(searchText) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchText } })} /></div>
-          </section>
-
-          <section className="settings-section">
-            <div className="section-title"><span>SYNC</span></div>
-            <div className="token-row"><input aria-label="GitHub token" type="text" value={token} onChange={(event) => setToken(event.target.value)} placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"} autoComplete="off" autoCapitalize="none" spellCheck={false} /><button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token)}>{state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}</button></div>
-            {!readonly && <div className="compact-actions sync-actions">
-              <button disabled={busy || !state.tokenConfigured} onClick={props.onUpload}>UPLOAD</button>
-              <button
-                disabled={busy || !state.tokenConfigured}
-                onMouseEnter={preloadDiffView}
-                onFocus={preloadDiffView}
-                onPointerDown={preloadDiffView}
-                onClick={props.onCompareRemote}
-              >
-                DIFF
+      {settingsOpen && (
+        <>
+          <div className="drawer-backdrop" aria-hidden="true" onClick={closeSettings} />
+          <aside
+            id="settings-drawer"
+            ref={settingsDrawerRef}
+            className="settings-drawer open"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            tabIndex={-1}
+            onKeyDown={trapTabKey}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="drawer-header">
+              <span id="settings-title" className="brand-lockup">
+                <img src="./firstlight-mark.png" alt="" />
+                FIRSTLIGHT
+              </span>
+              <button className="drawer-close icon-button" aria-label="Close settings" onClick={closeSettings}>
+                <X size={18} />
               </button>
-              {state.gistUrl && <a href={state.gistUrl} target="_blank" rel="noreferrer">OPEN ↗</a>}
-            </div>}
-          </section>
+            </header>
+            <div className="drawer-content">
+              <section className="settings-section">
+                <div className="section-title">
+                  <span>BOOKMARKS</span>
+                  {!readonly && (
+                    <button disabled={busy} onClick={props.onOpenBookmarkManager}>
+                      OPEN MANAGER ↗
+                    </button>
+                  )}
+                </div>
+                <div className="setting-line">
+                  <label>Open target</label>
+                  <div className="segmented" role="group" aria-label="Open target">
+                    <button
+                      aria-pressed={state.settings.openTarget === "new-tab"}
+                      className={state.settings.openTarget === "new-tab" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, openTarget: "new-tab" })}
+                    >
+                      NEW TAB
+                    </button>
+                    <button
+                      aria-pressed={state.settings.openTarget === "current-tab"}
+                      className={state.settings.openTarget === "current-tab" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, openTarget: "current-tab" })}
+                    >
+                      CURRENT
+                    </button>
+                  </div>
+                </div>
+                {!readonly && (
+                  <div className="setting-line">
+                    <label>Chrome import</label>
+                    <button aria-label="Import Chrome bookmarks" className="inline-action" disabled={busy} onClick={props.onImportBookmarks}>
+                      IMPORT
+                    </button>
+                  </div>
+                )}
+              </section>
 
-          {props.error && <div className="error-card">{props.error}</div>}
-        </div>
-      </aside></>}
+              <section className="settings-section">
+                <div className="section-title">
+                  <span>BACKGROUND</span>
+                </div>
+                <div className="setting-line">
+                  <label>Mode</label>
+                  <div className="segmented" role="group" aria-label="Background mode">
+                    <button
+                      aria-pressed={state.settings.background.type === "solid"}
+                      className={state.settings.background.type === "solid" ? "selected" : ""}
+                      onClick={() => setBackground({ type: "solid", color: modeColorSettings.from })}
+                    >
+                      SOLID
+                    </button>
+                    <button
+                      aria-pressed={state.settings.background.type === "gradient"}
+                      className={state.settings.background.type === "gradient" ? "selected" : ""}
+                      onClick={() => setBackground({ type: "gradient", ...modeColorSettings })}
+                    >
+                      GRADIENT
+                    </button>
+                    <button
+                      aria-pressed={state.settings.background.type === "dynamic"}
+                      className={state.settings.background.type === "dynamic" ? "selected" : ""}
+                      onClick={() =>
+                        setBackground(
+                          baselineDynamicBackground(
+                            state.settings.background,
+                            state.settings.background.type === "dynamic" ? state.settings.background.effect : "flow",
+                            state.settings.dynamicEffectProfiles
+                          )
+                        )
+                      }
+                    >
+                      DYNAMIC
+                    </button>
+                  </div>
+                </div>
+                {state.settings.background.type === "solid" ? (
+                  <div className="setting-line">
+                    <label>Color</label>
+                    <input
+                      aria-label="Background color"
+                      className="color-input"
+                      type="color"
+                      value={state.settings.background.color}
+                      onChange={(event) => setBackground({ type: "solid", color: event.target.value })}
+                    />
+                  </div>
+                ) : activeBackground.type === "dynamic" ? (
+                  (() => {
+                    const dynamicBackground = activeBackground;
+                    const effectDefinition = getDynamicEffectDefinition(dynamicBackground.effect);
+                    const parameters = normalizeDynamicParameters(dynamicBackground.effect, dynamicBackground.parameters);
+                    const speedLabel = effectDefinition.speed.label ?? "动画速度";
+                    return (
+                      <div lang="zh-CN">
+                        <div className="setting-line">
+                          <label>动效</label>
+                          <DynamicEffectPicker
+                            value={dynamicBackground.effect}
+                            onChange={(effect) => setBackground(baselineDynamicBackground(dynamicBackground, effect, state.settings.dynamicEffectProfiles))}
+                          />
+                        </div>
+                        {dynamicBackground.effect === "snow" || dynamicBackground.effect === "silk" ? (
+                          <div className="setting-line">
+                            <label className="parameter-copy">
+                              <span>{dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"}</span>
+                              <small>{dynamicBackground.effect === "snow" ? "控制所有雪花使用的颜色" : "控制整片丝绸流光使用的主色"}</small>
+                            </label>
+                            <input
+                              aria-label={dynamicBackground.effect === "snow" ? "雪花颜色" : "流光颜色"}
+                              className="color-input"
+                              type="color"
+                              value={dynamicBackground.from}
+                              onChange={(event) =>
+                                setBackground({
+                                  ...dynamicBackground,
+                                  from: event.target.value,
+                                  to: dynamicBackground.effect === "silk" ? event.target.value : dynamicBackground.to
+                                })
+                              }
+                            />
+                          </div>
+                        ) : (
+                          dynamicBackgroundHasColorControls(dynamicBackground) && (
+                            <div className="setting-line">
+                              <label className="parameter-copy">
+                                <span>动效颜色</span>
+                                <small>{dynamicColorHint(dynamicBackground.effect)}</small>
+                              </label>
+                              <div className="color-pair" role="group" aria-label="动效颜色">
+                                <input
+                                  aria-label="第一种动效颜色"
+                                  type="color"
+                                  value={dynamicBackground.from}
+                                  onChange={(event) => setBackground({ ...dynamicBackground, from: event.target.value })}
+                                />
+                                <input
+                                  aria-label="第二种动效颜色"
+                                  type="color"
+                                  value={dynamicBackground.to}
+                                  onChange={(event) => setBackground({ ...dynamicBackground, to: event.target.value })}
+                                />
+                              </div>
+                            </div>
+                          )
+                        )}
+                        {dynamicBackground.effect !== "neuroNoise" && effectDefinition.supportsAngle && (
+                          <div className="setting-line angle-line size-line">
+                            <label>
+                              <span className="parameter-copy">
+                                <span>流动方向</span>
+                                <small>旋转整个颜色场的运动方向</small>
+                              </span>
+                              <b>{dynamicBackground.angle}°</b>
+                            </label>
+                            <input
+                              aria-label="动效流动方向"
+                              type="range"
+                              min="0"
+                              max="360"
+                              value={dynamicBackground.angle}
+                              onChange={(event) => setBackground({ ...dynamicBackground, angle: Number(event.target.value) })}
+                            />
+                          </div>
+                        )}
+                        <div className="setting-line size-line speed-line">
+                          <label>
+                            <span className="parameter-copy">
+                              <span>{speedLabel}</span>
+                              {effectDefinition.speed.hint && <small>{effectDefinition.speed.hint}</small>}
+                            </span>
+                            <b>{dynamicBackground.speed}</b>
+                          </label>
+                          <input
+                            type="range"
+                            aria-label={speedLabel}
+                            min={effectDefinition.speed.min}
+                            max={effectDefinition.speed.max}
+                            step={effectDefinition.speed.step}
+                            value={dynamicBackground.speed}
+                            onChange={(event) => setBackground({ ...dynamicBackground, speed: Number(event.target.value) })}
+                          />
+                        </div>
+                        <DynamicEffectParameterRows
+                          definitions={effectDefinition.parameters}
+                          values={parameters}
+                          onChange={(nextParameters) => setBackground({ ...dynamicBackground, parameters: nextParameters })}
+                        />
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div>
+                    <div className="setting-line">
+                      <label>Colors</label>
+                      <div className="color-pair" role="group" aria-label="Gradient colors">
+                        <input
+                          aria-label="Gradient start color"
+                          type="color"
+                          value={modeColorSettings.from}
+                          onChange={(event) => updateGradientBackground({ from: event.target.value })}
+                        />
+                        <input
+                          aria-label="Gradient end color"
+                          type="color"
+                          value={modeColorSettings.to}
+                          onChange={(event) => updateGradientBackground({ to: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="setting-line angle-line">
+                      <label>
+                        Angle <b>{modeColorSettings.angle}°</b>
+                      </label>
+                      <input
+                        aria-label="Gradient angle"
+                        type="range"
+                        min="0"
+                        max="360"
+                        value={modeColorSettings.angle}
+                        onChange={(event) => updateGradientBackground({ angle: Number(event.target.value) })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </section>
 
-      {visibleDiff && diffKey && props.onCloseDiff && <Suspense fallback={<div className="modal-backdrop"><div className="loading-dialog">LOADING DIFF…</div></div>}>
-        <DiffView
-        key={diffKey}
-        diff={visibleDiff}
-        busy={busy}
-        onClose={() => { setDismissedDiffKey(diffKey); props.onCloseDiff?.(diffKey); }}
-        onUseLeft={() => {
-          setDismissedDiffKey(diffKey);
-          const action = props.onUseLocal ? props.onUseLocal(diffKey) : props.onCloseDiff?.(diffKey);
-          void Promise.resolve(action).catch(() => setDismissedDiffKey(undefined));
-        }}
-        onUseRight={() => {
-          setDismissedDiffKey(diffKey);
-          notesAppRef.current?.pausePersistence();
-          if (!props.onUseRemote) {
+              <section className="settings-section">
+                <div className="section-title">
+                  <span>FOREGROUND</span>
+                </div>
+                <div className="setting-line">
+                  <label>Theme</label>
+                  <div className="segmented" role="group" aria-label="Interface theme">
+                    <button
+                      aria-pressed={state.settings.features.themeMode === "dark"}
+                      className={state.settings.features.themeMode === "dark" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "dark" } })}
+                    >
+                      DARK
+                    </button>
+                    <button
+                      aria-pressed={state.settings.features.themeMode === "light"}
+                      className={state.settings.features.themeMode === "light" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, themeMode: "light" } })}
+                    >
+                      LIGHT
+                    </button>
+                  </div>
+                </div>
+                <div className="setting-line">
+                  <label>Text color</label>
+                  <input
+                    aria-label="Text color"
+                    className="color-input"
+                    type="color"
+                    value={state.settings.foreground.color}
+                    onChange={(event) => updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, color: event.target.value } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Theme color</label>
+                  <input
+                    aria-label="Theme color"
+                    className="color-input"
+                    type="color"
+                    value={state.settings.features.themeColor}
+                    onChange={(event) => updateSettings({ ...state.settings, features: { ...state.settings.features, themeColor: event.target.value } })}
+                  />
+                </div>
+                <div className="setting-line size-line">
+                  <label>
+                    Text size <b>{state.settings.foreground.fontSize}px</b>
+                  </label>
+                  <input
+                    aria-label="Text size"
+                    type="range"
+                    min="12"
+                    max="24"
+                    step="1"
+                    value={state.settings.foreground.fontSize}
+                    onChange={(event) =>
+                      updateSettings({ ...state.settings, foreground: { ...state.settings.foreground, fontSize: Number(event.target.value) } })
+                    }
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Clock</label>
+                  <ClockPicker
+                    label="Clock position"
+                    value={state.settings.clockPosition}
+                    onChange={(clockPosition) => updateSettings({ ...state.settings, clockPosition })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Clock seconds</label>
+                  <VisibilityToggle
+                    label="Clock seconds"
+                    visible={state.settings.features.clockSeconds}
+                    onChange={(clockSeconds) => updateSettings({ ...state.settings, features: { ...state.settings.features, clockSeconds } })}
+                  />
+                </div>
+              </section>
+
+              <section className="settings-section">
+                <div className="section-title">
+                  <span>HOME GRID</span>
+                  <i>
+                    {state.settings.layout.rows} × {state.settings.layout.columns}
+                  </i>
+                </div>
+                <div className="setting-line">
+                  <label>Rows</label>
+                  <OptionPicker
+                    label="Home grid rows"
+                    value={state.settings.layout.rows}
+                    options={[1, 2, 3, 4, 5, 6, 7, 8]}
+                    suffix="ROWS"
+                    onChange={(rows) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, rows } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Columns</label>
+                  <OptionPicker
+                    label="Home grid columns"
+                    value={state.settings.layout.columns}
+                    options={[2, 3, 4, 5, 6, 7, 8]}
+                    suffix="COLS"
+                    onChange={(columns) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, columns } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Bookmark alignment</label>
+                  <AlignmentPicker
+                    value={state.settings.layout.bookmarkAlignment}
+                    onChange={(bookmarkAlignment) => updateSettings({ ...state.settings, layout: { ...state.settings.layout, bookmarkAlignment } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Bookmark details</label>
+                  <VisibilityToggle
+                    label="Bookmark details"
+                    visible={state.settings.features.bookmarkDetails}
+                    onChange={(bookmarkDetails) => updateSettings({ ...state.settings, features: { ...state.settings.features, bookmarkDetails } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Hover highlight</label>
+                  <div className="segmented" role="group" aria-label="Hover highlight">
+                    <button
+                      aria-pressed={state.settings.features.hoverStyle === "underline"}
+                      className={state.settings.features.hoverStyle === "underline" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "underline" } })}
+                    >
+                      LINE
+                    </button>
+                    <button
+                      aria-pressed={state.settings.features.hoverStyle === "box"}
+                      className={state.settings.features.hoverStyle === "box" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "box" } })}
+                    >
+                      BOX
+                    </button>
+                    <button
+                      aria-pressed={state.settings.features.hoverStyle === "block"}
+                      className={state.settings.features.hoverStyle === "block" ? "selected" : ""}
+                      onClick={() => updateSettings({ ...state.settings, features: { ...state.settings.features, hoverStyle: "block" } })}
+                    >
+                      BLOCK
+                    </button>
+                  </div>
+                </div>
+                <div className="setting-line">
+                  <label>Search</label>
+                  <ClockPicker
+                    label="Search position"
+                    value={state.settings.features.searchPosition}
+                    onChange={(searchPosition) => {
+                      if (searchPosition === "hidden") {
+                        setQuery("");
+                        setSearchResultsOpen(false);
+                      }
+                      updateSettings({ ...state.settings, features: { ...state.settings.features, searchPosition } });
+                    }}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Search icon</label>
+                  <VisibilityToggle
+                    label="Search icon"
+                    visible={state.settings.features.searchIcon}
+                    onChange={(searchIcon) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchIcon } })}
+                  />
+                </div>
+                <div className="setting-line">
+                  <label>Search text</label>
+                  <SearchTextPicker
+                    value={state.settings.features.searchText}
+                    onChange={(searchText) => updateSettings({ ...state.settings, features: { ...state.settings.features, searchText } })}
+                  />
+                </div>
+              </section>
+
+              <section className="settings-section">
+                <div className="section-title">
+                  <span>SYNC</span>
+                </div>
+                <div className="token-row">
+                  <input
+                    aria-label="GitHub token"
+                    type="text"
+                    value={token}
+                    onChange={(event) => setToken(event.target.value)}
+                    placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                  <button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token, rememberToken)}>
+                    {state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}
+                  </button>
+                </div>
+                <label className="token-preference">
+                  <input type="checkbox" checked={rememberToken} onChange={(event) => setRememberToken(event.target.checked)} />
+                  Remember token on this device
+                </label>
+                <p className="settings-help">
+                  {rememberToken
+                    ? "Saved until you disconnect. Use only on a trusted device."
+                    : readonly
+                      ? "Kept only for this tab's session."
+                      : "Kept only until the browser closes."}{" "}
+                  Bookmarks and Notes are sent to your GitHub Gist; they are not end-to-end encrypted.
+                </p>
+                <p className="settings-help">
+                  <a href="./help.html" target="_blank" rel="noopener noreferrer">
+                    CONNECTION HELP & PRIVACY ↗
+                  </a>
+                </p>
+                <p className="settings-help" role="status">
+                  {state.sync.message}
+                </p>
+                {readonly && state.gistUrl && (
+                  <p className="settings-help">
+                    <a href={state.gistUrl} target="_blank" rel="noopener noreferrer">
+                      OPEN SOURCE GIST ↗
+                    </a>
+                  </p>
+                )}
+                {!readonly && (
+                  <div className="compact-actions sync-actions">
+                    <button disabled={busy || !state.tokenConfigured} onClick={props.onUpload}>
+                      UPLOAD
+                    </button>
+                    <button
+                      disabled={busy || !state.tokenConfigured}
+                      onMouseEnter={preloadDiffView}
+                      onFocus={preloadDiffView}
+                      onPointerDown={preloadDiffView}
+                      onClick={props.onCompareRemote}
+                    >
+                      DIFF
+                    </button>
+                    {state.gistUrl && (
+                      <a href={state.gistUrl} target="_blank" rel="noreferrer">
+                        OPEN ↗
+                      </a>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {props.error && (
+                <div className="error-card" role="alert">
+                  {props.error}
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
+      )}
+
+      {visibleDiff && diffKey && props.onCloseDiff && (
+        <ErrorBoundary
+          key={diffKey}
+          name="Snapshot comparison"
+          onClose={() => {
+            setDismissedDiffKey(diffKey);
             props.onCloseDiff?.(diffKey);
-            return;
-          }
-          void Promise.resolve(props.onUseRemote(diffKey)).then(() => {
-            setNotesResetKey((current) => current + 1);
-          }).catch(() => {
-            setDismissedDiffKey(undefined);
-            notesAppRef.current?.resumePersistence();
-          });
-        }}
-        />
-      </Suspense>}
+          }}
+        >
+          <Suspense
+            fallback={
+              <div className="modal-backdrop">
+                <div className="loading-dialog">LOADING DIFF…</div>
+              </div>
+            }
+          >
+            <DiffView
+              key={diffKey}
+              diff={visibleDiff}
+              busy={busy}
+              onClose={() => {
+                setDismissedDiffKey(diffKey);
+                props.onCloseDiff?.(diffKey);
+              }}
+              onUseLeft={() => {
+                setDismissedDiffKey(diffKey);
+                const action = props.onUseLocal ? props.onUseLocal(diffKey) : props.onCloseDiff?.(diffKey);
+                void Promise.resolve(action).catch(() => setDismissedDiffKey(undefined));
+              }}
+              onUseRight={() => {
+                setDismissedDiffKey(diffKey);
+                notesAppRef.current?.pausePersistence();
+                if (!props.onUseRemote) {
+                  props.onCloseDiff?.(diffKey);
+                  return;
+                }
+                void Promise.resolve(props.onUseRemote(diffKey))
+                  .then(() => {
+                    setNotesResetKey((current) => current + 1);
+                  })
+                  .catch(() => {
+                    setDismissedDiffKey(undefined);
+                    notesAppRef.current?.resumePersistence();
+                  });
+              }}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </main>
   );
 }

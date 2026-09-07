@@ -7,11 +7,7 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-export function normalizedCanvasPointer(
-  canvas: HTMLCanvasElement,
-  clientX: number,
-  clientY: number
-): NormalizedPointer | null {
+export function normalizedCanvasPointer(canvas: HTMLCanvasElement, clientX: number, clientY: number): NormalizedPointer | null {
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
   return {

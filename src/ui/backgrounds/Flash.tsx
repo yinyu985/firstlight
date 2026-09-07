@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useRef } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 import { boundedCanvasSize } from "./canvasSizing";
 
 type DynamicEffectParameterValue = string | number | boolean;
@@ -170,18 +170,11 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
   const lastPointerPositionRef = useRef<{ x: number; y: number; initialized: boolean }>({ x: 0.5, y: 0.5, initialized: false });
   const lastHumanInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const settings = resolveFlashSettings(props);
-  const {
-    simResolution: SIM_RESOLUTION,
-    dyeResolution: DYE_RESOLUTION,
-    densityDissipation: DENSITY_DISSIPATION,
-    velocityDissipation: VELOCITY_DISSIPATION,
-    pressure: PRESSURE,
-    curl: CURL,
-    splatRadius: SPLAT_RADIUS,
-    splatForce: SPLAT_FORCE,
-    colorUpdateSpeed: COLOR_UPDATE_SPEED,
-    autoMotion: AUTO_MOTION
-  } = settings;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const startLoopRef = useRef<(() => void) | null>(null);
+  const [contextGeneration, setContextGeneration] = useState(0);
+  const { simResolution: SIM_RESOLUTION, dyeResolution: DYE_RESOLUTION, autoMotion: AUTO_MOTION } = settings;
   const PRESSURE_ITERATIONS = 20;
   const SHADING = true;
 
@@ -194,15 +187,15 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     const config = {
       SIM_RESOLUTION,
       DYE_RESOLUTION,
-      DENSITY_DISSIPATION,
-      VELOCITY_DISSIPATION,
-      PRESSURE,
+      DENSITY_DISSIPATION: settingsRef.current.densityDissipation,
+      VELOCITY_DISSIPATION: settingsRef.current.velocityDissipation,
+      PRESSURE: settingsRef.current.pressure,
       PRESSURE_ITERATIONS,
-      CURL,
-      SPLAT_RADIUS,
-      SPLAT_FORCE,
+      CURL: settingsRef.current.curl,
+      SPLAT_RADIUS: settingsRef.current.splatRadius,
+      SPLAT_FORCE: settingsRef.current.splatForce,
       SHADING,
-      COLOR_UPDATE_SPEED
+      COLOR_UPDATE_SPEED: settingsRef.current.colorUpdateSpeed
     };
 
     let context: ReturnType<typeof getWebGLContext>;
@@ -950,6 +943,14 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     function updateFrame() {
       animationFrameId = null;
       if (disposed || document.visibilityState === "hidden") return;
+      const current = settingsRef.current;
+      config.DENSITY_DISSIPATION = current.densityDissipation;
+      config.VELOCITY_DISSIPATION = current.velocityDissipation;
+      config.PRESSURE = current.pressure;
+      config.CURL = current.curl;
+      config.SPLAT_RADIUS = current.splatRadius;
+      config.SPLAT_FORCE = current.splatForce;
+      config.COLOR_UPDATE_SPEED = current.colorUpdateSpeed;
       const dt = calcDeltaTime();
       if (resizeCanvas()) initFramebuffers();
       updateAutomaticPointer(dt);
@@ -1000,7 +1001,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function updateAutomaticPointer(deltaSeconds: number) {
-      if (!AUTO_MOTION || performance.now() - lastHumanInputTime < FLASH_AUTO_IDLE_MS) {
+      if (!settingsRef.current.autoMotion || performance.now() - lastHumanInputTime < FLASH_AUTO_IDLE_MS) {
         automaticPointerActive = false;
         return;
       }
@@ -1008,7 +1009,11 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       const pointer = pointers[0];
       if (!automaticPointerActive) {
         const x = pointerInitialized ? pointer.texcoordX : lastPointerPositionRef.current.initialized ? lastPointerPositionRef.current.x : automaticPointer.x;
-        const y = pointerInitialized ? 1 - pointer.texcoordY : lastPointerPositionRef.current.initialized ? lastPointerPositionRef.current.y : automaticPointer.y;
+        const y = pointerInitialized
+          ? 1 - pointer.texcoordY
+          : lastPointerPositionRef.current.initialized
+            ? lastPointerPositionRef.current.y
+            : automaticPointer.y;
         automaticPointer = { ...automaticPointer, x, y, velocityX: 0, velocityY: 0 };
         automaticPointerRef.current = automaticPointer;
         if (!pointerInitialized) {
@@ -1341,7 +1346,11 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function isUiInputTarget(target: EventTarget | null): boolean {
-      return target instanceof Element && target.closest("button, input, textarea, select, a, [contenteditable='true'], [role='button'], [role='listbox'], [role='option'], [role='slider']") !== null;
+      return (
+        target instanceof Element &&
+        target.closest("button, input, textarea, select, a, [contenteditable='true'], [role='button'], [role='listbox'], [role='option'], [role='slider']") !==
+          null
+      );
     }
 
     function handleMouseDown(event: MouseEvent) {
@@ -1422,10 +1431,19 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     window.addEventListener("touchend", handleTouchEnd, { passive: true });
     window.addEventListener("resize", handleResize);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    if (AUTO_MOTION) startLoop();
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      stopLoop();
+    };
+    const handleContextRestored = () => setContextGeneration((current) => current + 1);
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+    startLoopRef.current = startLoop;
+    if (settingsRef.current.autoMotion) startLoop();
 
     return () => {
       disposed = true;
+      startLoopRef.current = null;
       stopLoop();
       window.removeEventListener("mousedown", handleMouseDown);
       window.removeEventListener("mousemove", handleMouseMove);
@@ -1434,6 +1452,8 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("resize", handleResize);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
 
       if (framebuffersReady) {
         deleteDoubleFBO(dye);
@@ -1475,20 +1495,11 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       gl.deleteBuffer(blitBuffer);
       gl.deleteBuffer(blitElementBuffer);
     };
-  }, [
-    SIM_RESOLUTION,
-    DYE_RESOLUTION,
-    DENSITY_DISSIPATION,
-    VELOCITY_DISSIPATION,
-    PRESSURE,
-    PRESSURE_ITERATIONS,
-    CURL,
-    SPLAT_RADIUS,
-    SPLAT_FORCE,
-    SHADING,
-    COLOR_UPDATE_SPEED,
-    AUTO_MOTION
-  ]);
+  }, [SIM_RESOLUTION, DYE_RESOLUTION, PRESSURE_ITERATIONS, SHADING, contextGeneration]);
+
+  useEffect(() => {
+    if (AUTO_MOTION) startLoopRef.current?.();
+  }, [AUTO_MOTION]);
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />;
 }

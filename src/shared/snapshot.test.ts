@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, MAX_SNAPSHOT_BYTES, eastEightTimestamp, snapshotFrom, type SyncedSettings, type Snapshot } from "./model";
-import { DYNAMIC_EFFECT_DEFINITIONS, isDynamicEffect, normalizeDynamicEffect, type DynamicEffectParameterDefinition, type DynamicSpeedSpec, type DynamicEffectDefinition } from "./dynamicEffects";
+import {
+  DYNAMIC_EFFECT_DEFINITIONS,
+  isDynamicEffect,
+  normalizeDynamicEffect,
+  type DynamicEffectParameterDefinition,
+  type DynamicSpeedSpec,
+  type DynamicEffectDefinition
+} from "./dynamicEffects";
 import { parseSnapshot, prettySnapshot, serializeSnapshot, snapshotBytes, snapshotHash, stableStringify, validateSnapshot } from "./snapshot";
 
 type RangeParameter = Extract<DynamicEffectParameterDefinition, { kind: "range" }>;
@@ -10,9 +17,7 @@ function asRange(parameter: DynamicEffectParameterDefinition): parameter is Rang
 }
 
 function findNumericRange(definition: DynamicEffectDefinition, key: string): RangeParameter {
-  const parameter = definition.parameters.find(
-    (candidate): candidate is RangeParameter => candidate.kind === "range" && candidate.key === key
-  );
+  const parameter = definition.parameters.find((candidate): candidate is RangeParameter => candidate.kind === "range" && candidate.key === key);
   if (!parameter) throw new Error(`Missing range parameter "${key}" on ${definition.id}`);
   return parameter;
 }
@@ -32,17 +37,19 @@ function ensureInRange(spec: DynamicSpeedSpec | RangeParameter): void {
 
 describe("stableStringify", () => {
   it("sorts object keys but preserves array order", () => {
-    expect(stableStringify({ z: 1, a: [{ b: 2, a: 1 }] }))
-      .toBe('{"a":[{"a":1,"b":2}],"z":1}');
+    expect(stableStringify({ z: 1, a: [{ b: 2, a: 1 }] })).toBe('{"a":[{"a":1,"b":2}],"z":1}');
   });
 });
 
 describe("snapshotHash", () => {
   it("ignores updatedAt and reacts to bookmark order", async () => {
-    const first = snapshotFrom([
-      { title: "A", url: "https://example.com/a" },
-      { title: "B", url: "https://example.com/b" }
-    ], DEFAULT_SETTINGS);
+    const first = snapshotFrom(
+      [
+        { title: "A", url: "https://example.com/a" },
+        { title: "B", url: "https://example.com/b" }
+      ],
+      DEFAULT_SETTINGS
+    );
     const later: Snapshot = { ...first, updatedAt: "2030-01-01T08:00:00.000+08:00" };
     const reordered: Snapshot = { ...later, bookmarks: [...later.bookmarks].reverse() };
     expect(await snapshotHash(first)).toBe(await snapshotHash(later));
@@ -50,12 +57,19 @@ describe("snapshotHash", () => {
   });
 
   it("allows duplicate URLs and folders with the same title", () => {
-    expect(() => validateSnapshot(snapshotFrom([
-      { title: "Same", url: "https://example.com" },
-      { title: "Same", url: "https://example.com" },
-      { title: "Folder", children: [] },
-      { title: "Folder", children: [] }
-    ], DEFAULT_SETTINGS))).not.toThrow();
+    expect(() =>
+      validateSnapshot(
+        snapshotFrom(
+          [
+            { title: "Same", url: "https://example.com" },
+            { title: "Same", url: "https://example.com" },
+            { title: "Folder", children: [] },
+            { title: "Folder", children: [] }
+          ],
+          DEFAULT_SETTINGS
+        )
+      )
+    ).not.toThrow();
   });
 });
 
@@ -89,7 +103,16 @@ describe("canonical snapshot order", () => {
     expect(Object.keys(snapshot.config.background)).toEqual(["type", "from", "to", "angle"]);
     expect(Object.keys(snapshot.config.foreground)).toEqual(["color", "fontSize"]);
     expect(Object.keys(snapshot.config.layout)).toEqual(["rows", "columns", "bookmarkAlignment"]);
-    expect(Object.keys(snapshot.config.features)).toEqual(["searchPosition", "searchIcon", "searchText", "bookmarkDetails", "clockSeconds", "hoverStyle", "themeColor", "themeMode"]);
+    expect(Object.keys(snapshot.config.features)).toEqual([
+      "searchPosition",
+      "searchIcon",
+      "searchText",
+      "bookmarkDetails",
+      "clockSeconds",
+      "hoverStyle",
+      "themeColor",
+      "themeMode"
+    ]);
     expect(Object.keys(snapshot.bookmarks[0])).toEqual(["title", "url"]);
 
     const remote = parseSnapshot(JSON.stringify(snapshot));
@@ -225,10 +248,14 @@ describe("parseSnapshot", () => {
   });
 
   it("drops unknown dynamic effect profile IDs", () => {
-    const normalizedSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], {
-      ...DEFAULT_SETTINGS,
-      background: { type: "dynamic", effect: "cells", from: "#102030", to: "#304050", angle: 145, speed: 17, parameters: { wallThickness: 1 } }
-    }))) as unknown as { config: { dynamicEffectProfiles: unknown } };
+    const normalizedSnapshot = JSON.parse(
+      JSON.stringify(
+        snapshotFrom([], {
+          ...DEFAULT_SETTINGS,
+          background: { type: "dynamic", effect: "cells", from: "#102030", to: "#304050", angle: 145, speed: 17, parameters: { wallThickness: 1 } }
+        })
+      )
+    ) as unknown as { config: { dynamicEffectProfiles: unknown } };
     normalizedSnapshot.config.dynamicEffectProfiles = {
       unknownEffect: {
         from: "#102030",
@@ -286,7 +313,9 @@ describe("parseSnapshot", () => {
       }
     };
 
-    const flashSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.flash))) as { config: { background: { parameters: Record<string, unknown> } } };
+    const flashSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.flash))) as {
+      config: { background: { parameters: Record<string, unknown> } };
+    };
     flashSnapshot.config.background.parameters.simResolution = 192;
     flashSnapshot.config.background.parameters.dyeResolution = 1024;
     flashSnapshot.config.background.parameters.densityDissipation = 6;
@@ -298,7 +327,9 @@ describe("parseSnapshot", () => {
     flashSnapshot.config.background.parameters.autoMotion = true;
     const parsedFlash = parseSnapshot(JSON.stringify(flashSnapshot));
 
-    const dotGridSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.dotGrid))) as { config: { background: { parameters: Record<string, unknown> } } };
+    const dotGridSnapshot = JSON.parse(JSON.stringify(snapshotFrom([], settingsByEffect.dotGrid))) as {
+      config: { background: { parameters: Record<string, unknown> } };
+    };
     const parsedDotGrid = parseSnapshot(JSON.stringify(dotGridSnapshot));
     const lightPillarSnapshot = snapshotFrom([], settingsByEffect.lightPillar);
     const parsedLightPillar = parseSnapshot(JSON.stringify(lightPillarSnapshot));
@@ -334,17 +365,21 @@ describe("parseSnapshot", () => {
   });
 
   it("keeps current dynamic effect profiles while dropping unknown profile IDs", () => {
-    const input = JSON.parse(JSON.stringify(snapshotFrom([], {
-      ...DEFAULT_SETTINGS,
-      background: {
-        type: "dynamic",
-        effect: "cells",
-        from: "#102030",
-        to: "#304050",
-        angle: 145,
-        speed: 10
-      }
-    }))) as { config: { dynamicEffectProfiles: Record<string, unknown> } };
+    const input = JSON.parse(
+      JSON.stringify(
+        snapshotFrom([], {
+          ...DEFAULT_SETTINGS,
+          background: {
+            type: "dynamic",
+            effect: "cells",
+            from: "#102030",
+            to: "#304050",
+            angle: 145,
+            speed: 10
+          }
+        })
+      )
+    ) as { config: { dynamicEffectProfiles: Record<string, unknown> } };
     input.config.dynamicEffectProfiles = {
       flow: {
         from: "#111111",
@@ -491,7 +526,10 @@ describe("parseSnapshot", () => {
 
   it("preserves opaque URL schemes without executing or filtering them", () => {
     const urls = ["javascript:alert(1)", "data:text/plain,hello", "file:///tmp/a", "custom:value"];
-    const snapshot = snapshotFrom(urls.map((url) => ({ title: url, url })), DEFAULT_SETTINGS);
+    const snapshot = snapshotFrom(
+      urls.map((url) => ({ title: url, url })),
+      DEFAULT_SETTINGS
+    );
     expect(parseSnapshot(JSON.stringify(snapshot)).bookmarks.map((item) => item.url)).toEqual(urls);
   });
 
@@ -567,13 +605,21 @@ describe("parseSnapshot", () => {
 describe("snapshot upload size", () => {
   it("uses the uploaded pretty JSON bytes at the exact 10 MiB boundary", () => {
     const timestamp = "2026-08-12T10:00:00.000+08:00";
-    const makeSnapshot = (content: string): Snapshot => snapshotFrom([], DEFAULT_SETTINGS, [{
-      id: "size-boundary",
-      name: "Boundary",
-      content,
-      createtime: timestamp,
-      updatetime: timestamp
-    }], timestamp);
+    const makeSnapshot = (content: string): Snapshot =>
+      snapshotFrom(
+        [],
+        DEFAULT_SETTINGS,
+        [
+          {
+            id: "size-boundary",
+            name: "Boundary",
+            content,
+            createtime: timestamp,
+            updatetime: timestamp
+          }
+        ],
+        timestamp
+      );
     const fixedBytes = snapshotBytes(makeSnapshot(""));
     const content = "x".repeat(MAX_SNAPSHOT_BYTES - fixedBytes);
     const exact = makeSnapshot(content);
@@ -597,10 +643,14 @@ describe("dynamic effect range schema", () => {
       expect(normalizeDynamicEffect(value)).toBe("flow");
     }
 
-    const invalid = JSON.parse(JSON.stringify(snapshotFrom([], {
-      ...DEFAULT_SETTINGS,
-      background: { type: "dynamic", effect: "flow", from: "#102030", to: "#304050", angle: 145, speed: 10 }
-    })));
+    const invalid = JSON.parse(
+      JSON.stringify(
+        snapshotFrom([], {
+          ...DEFAULT_SETTINGS,
+          background: { type: "dynamic", effect: "flow", from: "#102030", to: "#304050", angle: 145, speed: 10 }
+        })
+      )
+    );
     invalid.config.background.effect = "constructor";
     expect(parseSnapshot(JSON.stringify(invalid)).config.background).toMatchObject({
       type: "dynamic",

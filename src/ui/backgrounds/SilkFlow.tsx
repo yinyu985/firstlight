@@ -127,11 +127,7 @@ export function resolveSilkFlowSettings(speed = 9, parameters: SilkFlowParameter
 export function silkFlowColor(hex: string, fallback = "#48b676"): [number, number, number] {
   const valid = /^#[0-9a-f]{6}$/i.test(hex) ? hex : fallback;
   const resolved = /^#[0-9a-f]{6}$/i.test(valid) ? valid : "#48b676";
-  return [
-    Number.parseInt(resolved.slice(1, 3), 16) / 255,
-    Number.parseInt(resolved.slice(3, 5), 16) / 255,
-    Number.parseInt(resolved.slice(5, 7), 16) / 255
-  ];
+  return [Number.parseInt(resolved.slice(1, 3), 16) / 255, Number.parseInt(resolved.slice(3, 5), 16) / 255, Number.parseInt(resolved.slice(5, 7), 16) / 255];
 }
 
 function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {

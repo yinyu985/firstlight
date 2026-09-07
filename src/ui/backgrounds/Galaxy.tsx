@@ -421,7 +421,7 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
       const settings = runtimeRef.current;
       if (!settings.disableAnimation) {
         elapsed += delta;
-        starPhase = elapsed * settings.starSpeed / 10;
+        starPhase = (elapsed * settings.starSpeed) / 10;
       }
       const mouse = mouseRef.current;
       if (!settings.mouseInteraction) mouse.targetActive = 0;

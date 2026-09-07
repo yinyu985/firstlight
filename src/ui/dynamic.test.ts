@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getDynamicEffectDefinition } from "../shared/dynamicEffects";
 import { dynamicTimeScale, hexToOklab, resolveCellWallThickness, resolveSmokeSettings } from "./DynamicBackground";
-import {
-  dotGridInertiaStep,
-  dotGridProximityMix,
-  dotGridReturnProgress,
-  dotGridShockImpulse,
-  resolveDotGridSettings
-} from "./backgrounds/DotGrid";
+import { dotGridInertiaStep, dotGridProximityMix, dotGridReturnProgress, dotGridShockImpulse, resolveDotGridSettings } from "./backgrounds/DotGrid";
 import { resolveGalaxySettings } from "./backgrounds/Galaxy";
 import { lightPillarColor, resolveLightPillarSettings } from "./backgrounds/LightPillar";
 import { resolveSnowSettings, snowColor } from "./backgrounds/Snow";
@@ -54,20 +48,22 @@ describe("Dynamic background", () => {
 
   it("uses the linked Flash state as defaults while keeping every control live and bounded", () => {
     expect(resolveFlashSettings()).toEqual(FLASH_DEFAULTS);
-    expect(resolveFlashSettings({
-      speed: 31,
-      parameters: {
-        simResolution: 192,
-        dyeResolution: 1024,
-        densityDissipation: 6,
-        velocityDissipation: 4,
-        pressure: 0.7,
-        curl: 20,
-        splatRadius: 0.8,
-        splatForce: 9000,
-        autoMotion: true
-      }
-    })).toEqual({
+    expect(
+      resolveFlashSettings({
+        speed: 31,
+        parameters: {
+          simResolution: 192,
+          dyeResolution: 1024,
+          densityDissipation: 6,
+          velocityDissipation: 4,
+          pressure: 0.7,
+          curl: 20,
+          splatRadius: 0.8,
+          splatForce: 9000,
+          autoMotion: true
+        }
+      })
+    ).toEqual({
       simResolution: 192,
       dyeResolution: 1024,
       densityDissipation: 6,
@@ -79,20 +75,22 @@ describe("Dynamic background", () => {
       colorUpdateSpeed: 31,
       autoMotion: true
     });
-    expect(resolveFlashSettings({
-      speed: 99,
-      parameters: {
-        simResolution: 1,
-        dyeResolution: 9999,
-        densityDissipation: 99,
-        velocityDissipation: 0,
-        pressure: -1,
-        curl: 99,
-        splatRadius: 0,
-        splatForce: 99999,
-        autoMotion: "invalid"
-      }
-    })).toEqual({
+    expect(
+      resolveFlashSettings({
+        speed: 99,
+        parameters: {
+          simResolution: 1,
+          dyeResolution: 9999,
+          densityDissipation: 99,
+          velocityDissipation: 0,
+          pressure: -1,
+          curl: 99,
+          splatRadius: 0,
+          splatForce: 99999,
+          autoMotion: "invalid"
+        }
+      })
+    ).toEqual({
       simResolution: 32,
       dyeResolution: 2048,
       densityDissipation: 10,
@@ -180,9 +178,7 @@ describe("Dynamic background", () => {
       hueShift: 360,
       repulsionStrength: 0
     });
-    const centerRepulsion = getDynamicEffectDefinition("galaxy").parameters.find(
-      (parameter) => parameter.key === "autoCenterRepulsion"
-    );
+    const centerRepulsion = getDynamicEffectDefinition("galaxy").parameters.find((parameter) => parameter.key === "autoCenterRepulsion");
     expect(centerRepulsion?.hint).toContain("大于 0 时中心推力优先，鼠标跟随和鼠标推开暂时不生效");
   });
 
@@ -200,18 +196,20 @@ describe("Dynamic background", () => {
       variant: "snowflake",
       direction: 90
     });
-    expect(resolveSnowSettings(99, {
-      flakeSize: -1,
-      minFlakeSize: 99,
-      pixelResolution: 9999,
-      depthFade: 0,
-      farPlane: 999,
-      brightness: 99,
-      gamma: 0,
-      density: 3,
-      variant: "invalid" as "snowflake",
-      direction: -20
-    })).toEqual({
+    expect(
+      resolveSnowSettings(99, {
+        flakeSize: -1,
+        minFlakeSize: 99,
+        pixelResolution: 9999,
+        depthFade: 0,
+        farPlane: 999,
+        brightness: 99,
+        gamma: 0,
+        density: 3,
+        variant: "invalid" as "snowflake",
+        direction: -20
+      })
+    ).toEqual({
       flakeSize: 0.001,
       minFlakeSize: 3,
       pixelResolution: 2000,

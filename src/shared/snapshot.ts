@@ -10,13 +10,7 @@ import {
   type DynamicEffectProfiles,
   type Snapshot
 } from "./model";
-import {
-  getDynamicEffectSpeed,
-  isDynamicEffect,
-  normalizeDynamicEffect,
-  normalizeDynamicParameters,
-  normalizeDynamicSpeed
-} from "./dynamicEffects";
+import { getDynamicEffectSpeed, isDynamicEffect, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed } from "./dynamicEffects";
 
 const encoder = new TextEncoder();
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -26,7 +20,7 @@ function stableValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([key, child]) => [key, stableValue(child)])
     );
   }
@@ -64,20 +58,28 @@ export async function prettySnapshot(snapshot: Snapshot): Promise<string> {
 }
 
 export async function projectSnapshotForDiff(snapshot: Snapshot): Promise<Snapshot> {
-  const project = async (nodes: BookmarkItem[]): Promise<BookmarkItem[]> => Promise.all(nodes.map(async (node) => {
-    if (node.url === undefined) return { title: node.title, children: await project(node.children ?? []) };
-    if (encoder.encode(node.url).byteLength <= 4096) return { title: node.title, url: node.url };
-    const bytes = encoder.encode(node.url).byteLength;
-    const protocolMatch = node.url.match(/^([a-z][a-z0-9+.-]*:)/i)?.[1];
-    const protocol = protocolMatch ?? "unknown:";
-    const contentStart = protocolMatch?.length ?? 0;
-    const hash = await sha256(node.url);
-    return {
-      title: node.title,
-      url: `${protocol}${node.url.slice(contentStart, contentStart + 256)}… [${bytes} bytes; SHA-256 ${hash}]`
-    };
-  }));
-  return canonicalSnapshot({ ...snapshot, bookmarks: await project(snapshot.bookmarks) });
+  const projectText = async (text: string) =>
+    text.length <= 4096 ? text : `${text.slice(0, 256)}… [${encoder.encode(text).byteLength} bytes; SHA-256 ${await sha256(text)}]`;
+  const project = async (nodes: BookmarkItem[]): Promise<BookmarkItem[]> =>
+    Promise.all(
+      nodes.map(async (node) => {
+        if (node.url === undefined) return { title: node.title, children: await project(node.children ?? []) };
+        if (encoder.encode(node.url).byteLength <= 4096) return { title: node.title, url: node.url };
+        const bytes = encoder.encode(node.url).byteLength;
+        const protocolMatch = node.url.match(/^([a-z][a-z0-9+.-]*:)/i)?.[1];
+        const protocol = protocolMatch ?? "unknown:";
+        const contentStart = protocolMatch?.length ?? 0;
+        const hash = await sha256(node.url);
+        return {
+          title: node.title,
+          url: `${protocol}${node.url.slice(contentStart, contentStart + 256)}… [${bytes} bytes; SHA-256 ${hash}]`
+        };
+      })
+    );
+  const notes = await Promise.all(
+    snapshot.notes.map(async (note) => ({ ...note, name: await projectText(note.name), content: await projectText(note.content) }))
+  );
+  return canonicalSnapshot({ ...snapshot, notes, bookmarks: await project(snapshot.bookmarks) });
 }
 
 export class SnapshotValidationError extends Error {
@@ -92,9 +94,7 @@ export function validateNotes(value: unknown): SyncNote[] {
   if (!Array.isArray(value)) throw new SnapshotValidationError("Invalid notes list");
   const ids = new Set<string>();
   const supportedKeys = new Set(["id", "name", "content", "createtime", "updatetime"]);
-  const isValidTimestamp = (raw: unknown): raw is string => (
-    typeof raw === "string" && raw.endsWith("+08:00") && !Number.isNaN(Date.parse(raw))
-  );
+  const isValidTimestamp = (raw: unknown): raw is string => typeof raw === "string" && raw.endsWith("+08:00") && !Number.isNaN(Date.parse(raw));
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new SnapshotValidationError(`Invalid note item at index ${index}`);
@@ -160,19 +160,18 @@ export function validateSnapshot(input: unknown): Snapshot {
   if (background.type === "solid" && (typeof background.color !== "string" || !HEX_COLOR.test(background.color))) {
     throw new SnapshotValidationError("Invalid solid background color");
   }
-  const backgroundUsesGenericColors = background.type === "gradient" || (
-    background.type === "dynamic" && background.effect !== "neuroNoise"
-  );
-  if (backgroundUsesGenericColors && (
-    typeof background.from !== "string" || !HEX_COLOR.test(background.from) ||
-    typeof background.to !== "string" || !HEX_COLOR.test(background.to)
-  )) {
+  const backgroundUsesGenericColors = background.type === "gradient" || (background.type === "dynamic" && background.effect !== "neuroNoise");
+  if (
+    backgroundUsesGenericColors &&
+    (typeof background.from !== "string" || !HEX_COLOR.test(background.from) || typeof background.to !== "string" || !HEX_COLOR.test(background.to))
+  ) {
     throw new SnapshotValidationError("Invalid gradient settings");
   }
-  if (backgroundUsesGenericColors && (
-    typeof background.angle !== "number" || !Number.isFinite(background.angle) ||
-    background.angle < 0 || background.angle > 360
-  )) throw new SnapshotValidationError("Invalid gradient settings");
+  if (
+    backgroundUsesGenericColors &&
+    (typeof background.angle !== "number" || !Number.isFinite(background.angle) || background.angle < 0 || background.angle > 360)
+  )
+    throw new SnapshotValidationError("Invalid gradient settings");
   if (background.type === "dynamic") {
     if (background.effect !== undefined && !isDynamicEffect(background.effect)) {
       throw new SnapshotValidationError("Invalid dynamic background effect");
@@ -198,16 +197,27 @@ export function validateSnapshot(input: unknown): Snapshot {
       }
       const profile = rawProfile as Record<string, unknown>;
       const effect = effectInput;
-      if (effect !== "neuroNoise" && (
-        typeof profile.from !== "string" || !HEX_COLOR.test(profile.from) ||
-        typeof profile.to !== "string" || !HEX_COLOR.test(profile.to) ||
-        typeof profile.angle !== "number" || !Number.isFinite(profile.angle) || profile.angle < 0 || profile.angle > 360
-      )) {
+      if (
+        effect !== "neuroNoise" &&
+        (typeof profile.from !== "string" ||
+          !HEX_COLOR.test(profile.from) ||
+          typeof profile.to !== "string" ||
+          !HEX_COLOR.test(profile.to) ||
+          typeof profile.angle !== "number" ||
+          !Number.isFinite(profile.angle) ||
+          profile.angle < 0 ||
+          profile.angle > 360)
+      ) {
         throw new SnapshotValidationError("Invalid dynamic effect profile colors or angle");
       }
       const speedSpec = getDynamicEffectSpeed(effect);
-      if (typeof profile.speed !== "number" || !Number.isFinite(profile.speed) ||
-        (speedSpec.integer && !Number.isInteger(profile.speed)) || profile.speed < speedSpec.min || profile.speed > speedSpec.max) {
+      if (
+        typeof profile.speed !== "number" ||
+        !Number.isFinite(profile.speed) ||
+        (speedSpec.integer && !Number.isInteger(profile.speed)) ||
+        profile.speed < speedSpec.min ||
+        profile.speed > speedSpec.max
+      ) {
         throw new SnapshotValidationError("Invalid dynamic effect profile speed");
       }
       if (effect === "neuroNoise") {
@@ -229,20 +239,31 @@ export function validateSnapshot(input: unknown): Snapshot {
   };
   const dynamicEffectProfiles = parseDynamicEffectProfiles(config.dynamicEffectProfiles);
   const foreground = config.foreground as Record<string, unknown> | undefined;
-  if (!foreground || (
-    typeof foreground.color !== "string" || !HEX_COLOR.test(foreground.color) ||
-    typeof foreground.fontSize !== "number" || !Number.isInteger(foreground.fontSize) ||
-    foreground.fontSize < 12 || foreground.fontSize > 24
-  )) {
+  if (
+    !foreground ||
+    typeof foreground.color !== "string" ||
+    !HEX_COLOR.test(foreground.color) ||
+    typeof foreground.fontSize !== "number" ||
+    !Number.isInteger(foreground.fontSize) ||
+    foreground.fontSize < 12 ||
+    foreground.fontSize > 24
+  ) {
     throw new SnapshotValidationError("Invalid foreground settings");
   }
   const layout = config.layout as Record<string, unknown> | undefined;
   const bookmarkAlignment = layout?.bookmarkAlignment ?? "center";
-  if (!layout || (
-    typeof layout.rows !== "number" || !Number.isInteger(layout.rows) || layout.rows < 1 || layout.rows > 10 ||
-    typeof layout.columns !== "number" || !Number.isInteger(layout.columns) || layout.columns < 2 || layout.columns > 10 ||
+  if (
+    !layout ||
+    typeof layout.rows !== "number" ||
+    !Number.isInteger(layout.rows) ||
+    layout.rows < 1 ||
+    layout.rows > 10 ||
+    typeof layout.columns !== "number" ||
+    !Number.isInteger(layout.columns) ||
+    layout.columns < 2 ||
+    layout.columns > 10 ||
     (bookmarkAlignment !== "left" && bookmarkAlignment !== "center" && bookmarkAlignment !== "right")
-  )) {
+  ) {
     throw new SnapshotValidationError("Invalid home grid settings");
   }
   const clockPosition = config.clockPosition;
@@ -266,14 +287,8 @@ export function validateSnapshot(input: unknown): Snapshot {
   const searchPosition = features?.searchPosition;
   const searchIcon = features?.searchIcon;
   const searchText = features?.searchText;
-  const normalizedSearchText = searchText === true
-    ? "left"
-    : searchText === false
-      ? "hidden"
-      : searchText;
-  const isSearchTextPosition = (value: unknown): value is ClockPosition => (
-    value === "hidden" || value === "left" || value === "center" || value === "right"
-  );
+  const normalizedSearchText = searchText === true ? "left" : searchText === false ? "hidden" : searchText;
+  const isSearchTextPosition = (value: unknown): value is ClockPosition => value === "hidden" || value === "left" || value === "center" || value === "right";
   const bookmarkDetails = features?.bookmarkDetails;
   const clockSeconds = features?.clockSeconds;
   const hoverStyle = features?.hoverStyle === undefined ? "underline" : features.hoverStyle;
@@ -282,12 +297,15 @@ export function validateSnapshot(input: unknown): Snapshot {
   if (typeof themeColor !== "string" || !HEX_COLOR.test(themeColor)) {
     throw new SnapshotValidationError("Theme color is missing or invalid");
   }
-  if ((searchPosition !== "hidden" && searchPosition !== "left" && searchPosition !== "center" && searchPosition !== "right") ||
+  if (
+    (searchPosition !== "hidden" && searchPosition !== "left" && searchPosition !== "center" && searchPosition !== "right") ||
     typeof searchIcon !== "boolean" ||
     !isSearchTextPosition(normalizedSearchText) ||
-    typeof bookmarkDetails !== "boolean" || typeof clockSeconds !== "boolean" ||
+    typeof bookmarkDetails !== "boolean" ||
+    typeof clockSeconds !== "boolean" ||
     (hoverStyle !== "underline" && hoverStyle !== "box" && hoverStyle !== "block") ||
-    (themeMode !== "dark" && themeMode !== "light")) {
+    (themeMode !== "dark" && themeMode !== "light")
+  ) {
     throw new SnapshotValidationError("Feature settings are invalid");
   }
   if (!Array.isArray(value.bookmarks)) throw new SnapshotValidationError("Invalid bookmark tree");
@@ -327,30 +345,32 @@ export function validateSnapshot(input: unknown): Snapshot {
     updatedAt: value.updatedAt,
     config: {
       openTarget: config.openTarget,
-      background: background.type === "solid"
-        ? { type: "solid" as const, color: background.color as string }
-        : background.type === "gradient" ? {
-            type: "gradient" as const,
-            from: background.from as string,
-            to: background.to as string,
-            angle: background.angle as number
-          } : normalizeDynamicEffect(background.effect) === "neuroNoise" ? {
-            type: "dynamic" as const,
-            effect: "neuroNoise" as const,
-            speed: normalizeDynamicSpeed("neuroNoise", background.speed as number),
-            parameters: normalizeDynamicParameters("neuroNoise", background.parameters)
-          } : {
-            type: "dynamic" as const,
-            effect: normalizeDynamicEffect(background.effect),
-            from: background.from as string,
-            to: background.to as string,
-            angle: background.angle as number,
-            speed: normalizeDynamicSpeed(normalizeDynamicEffect(background.effect), background.speed as number),
-            parameters: normalizeDynamicParameters(
-              normalizeDynamicEffect(background.effect),
-              background.parameters
-            )
-          },
+      background:
+        background.type === "solid"
+          ? { type: "solid" as const, color: background.color as string }
+          : background.type === "gradient"
+            ? {
+                type: "gradient" as const,
+                from: background.from as string,
+                to: background.to as string,
+                angle: background.angle as number
+              }
+            : normalizeDynamicEffect(background.effect) === "neuroNoise"
+              ? {
+                  type: "dynamic" as const,
+                  effect: "neuroNoise" as const,
+                  speed: normalizeDynamicSpeed("neuroNoise", background.speed as number),
+                  parameters: normalizeDynamicParameters("neuroNoise", background.parameters)
+                }
+              : {
+                  type: "dynamic" as const,
+                  effect: normalizeDynamicEffect(background.effect),
+                  from: background.from as string,
+                  to: background.to as string,
+                  angle: background.angle as number,
+                  speed: normalizeDynamicSpeed(normalizeDynamicEffect(background.effect), background.speed as number),
+                  parameters: normalizeDynamicParameters(normalizeDynamicEffect(background.effect), background.parameters)
+                },
       dynamicEffectProfiles,
       foreground: { color: foreground.color as string, fontSize: foreground.fontSize as number },
       layout: { rows: layout.rows as number, columns: layout.columns as number, bookmarkAlignment },

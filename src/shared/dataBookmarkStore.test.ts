@@ -12,8 +12,9 @@ describe("data bookmark routing", () => {
 
   it("keeps data URLs openable through the dedicated viewer", () => {
     expect(canOpenBookmark("data:text/html,hello")).toBe(true);
-    expect(dataBookmarkViewerUrl("entry / 1", "chrome-extension://firstlight/newtab.html"))
-      .toBe("chrome-extension://firstlight/data-viewer.html#entry%20%2F%201");
+    expect(dataBookmarkViewerUrl("entry / 1", "chrome-extension://firstlight/newtab.html")).toBe(
+      "chrome-extension://firstlight/data-viewer.html#entry%20%2F%201"
+    );
   });
 
   it("stages each data URL for one successful consume", async () => {

@@ -1,9 +1,23 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import { Check, Plus, Search, Trash2, X } from "lucide-react";
 import { formatNoteDate, useNotes } from "./useNotes";
 import type { SyncNote } from "../../shared/model";
 import { getNoteContentStats } from "./metrics";
 import { scrollbarMetrics, type ScrollbarMetrics } from "../scrollbar";
+import type { NoteSortMode } from "./types";
+import { Picker } from "../Picker";
+import { VirtualItems } from "../VirtualItems";
+import { focusableElements } from "../focus";
 
 interface NotesSidebarProps {
   notes: {
@@ -13,6 +27,8 @@ interface NotesSidebarProps {
   }[];
   selectedId: string | null;
   query: string;
+  sortMode: NoteSortMode;
+  onSortChange: (mode: NoteSortMode) => void;
   activeDeleteNoteId: string | null;
   onQueryChange: (value: string) => void;
   onSelect: (noteId: string) => void;
@@ -27,6 +43,8 @@ function NotesSidebar({
   notes,
   selectedId,
   query,
+  sortMode,
+  onSortChange,
   activeDeleteNoteId,
   onQueryChange,
   onSelect,
@@ -41,48 +59,93 @@ function NotesSidebar({
       <header className="notes-sidebar-header">
         <div className="notes-sidebar-title">
           <h2>Notes</h2>
+          <Picker
+            value={sortMode}
+            options={[
+              { value: "updated-desc", label: "MODIFIED" },
+              { value: "created-desc", label: "CREATED" }
+            ]}
+            label="Sort notes"
+            onChange={onSortChange}
+          />
         </div>
       </header>
 
       <div className="notes-search-wrap">
         <Search className="notes-search-icon" size={17} strokeWidth={1.7} aria-hidden="true" />
-        <input className="notes-search" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="SEARCH NOTES" autoComplete="off" />
+        <input
+          className="notes-search"
+          aria-label="Search notes"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="SEARCH NOTES"
+          autoComplete="off"
+        />
       </div>
 
       <div className="notes-list" role="list">
-        {notes.length ? notes.map((note) => (
-          <div key={note.id} role="listitem" className={`notes-item-wrap ${selectedId === note.id ? "is-active" : ""}`}>
-            <button type="button" className="notes-item" onClick={() => onSelect(note.id)} onContextMenu={(event) => {
-              event.preventDefault();
-              if (!readonly) onStartDelete(note.id);
-            }}>
-              <span className="notes-item-title">{note.title || "New note"}</span>
-              <span className="notes-item-time">{formatNoteDate(note.updatedAt)}</span>
-            </button>
-            {!readonly && (activeDeleteNoteId === note.id ? (
-              <span className="notes-delete-confirm" onClick={(event) => event.stopPropagation()}>
-                <button type="button" className="notes-delete-btn notes-delete-confirm-btn notes-delete-confirm-yes" aria-label={`Confirm delete ${note.title || "new note"}`} onClick={() => onConfirmDelete(note.id)}>
-                  <Check size={15} strokeWidth={1.7} aria-hidden="true" />
-                </button>
-                <button type="button" className="notes-delete-btn notes-delete-confirm-btn notes-delete-confirm-no" aria-label={`Cancel deleting ${note.title || "new note"}`} onClick={onCancelDelete}>
-                  <X size={15} strokeWidth={1.7} aria-hidden="true" />
-                </button>
-              </span>
-            ) : (
-              <button type="button" className="notes-delete-btn" aria-label={`Delete ${note.title || "new note"}`} onClick={(event) => {
-                event.stopPropagation();
-                onStartDelete(note.id);
-              }}>
-                <Trash2 size={15} strokeWidth={1.7} aria-hidden="true" />
+        <VirtualItems
+          className="notes-list-content"
+          items={notes}
+          rowHeight={39}
+          renderItem={(note) => (
+            <div key={note.id} role="listitem" className={`notes-item-wrap ${selectedId === note.id ? "is-active" : ""}`}>
+              <button
+                type="button"
+                className="notes-item"
+                onClick={() => onSelect(note.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (!readonly) onStartDelete(note.id);
+                }}
+              >
+                <span className="notes-item-title">{note.title || "New note"}</span>
+                <span className="notes-item-time">{formatNoteDate(note.updatedAt)}</span>
               </button>
-            ))}
-          </div>
-        )) : <div className="notes-list-empty" aria-hidden="true" />}
+              {!readonly &&
+                (activeDeleteNoteId === note.id ? (
+                  <span className="notes-delete-confirm" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="notes-delete-btn notes-delete-confirm-btn notes-delete-confirm-yes"
+                      aria-label={`Confirm delete ${note.title || "new note"}`}
+                      onClick={() => onConfirmDelete(note.id)}
+                    >
+                      <Check size={15} strokeWidth={1.7} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-delete-btn notes-delete-confirm-btn notes-delete-confirm-no"
+                      aria-label={`Cancel deleting ${note.title || "new note"}`}
+                      onClick={onCancelDelete}
+                    >
+                      <X size={15} strokeWidth={1.7} aria-hidden="true" />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="notes-delete-btn"
+                    aria-label={`Delete ${note.title || "new note"}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onStartDelete(note.id);
+                    }}
+                  >
+                    <Trash2 size={15} strokeWidth={1.7} aria-hidden="true" />
+                  </button>
+                ))}
+            </div>
+          )}
+          empty={<div className="notes-list-empty" aria-hidden="true" />}
+        />
       </div>
 
-      {!readonly && <button type="button" className="notes-new-btn" onClick={onCreate} aria-label="Create new note">
-        <Plus size={22} strokeWidth={1.8} aria-hidden="true" />
-      </button>}
+      {!readonly && (
+        <button type="button" className="notes-new-btn" onClick={onCreate} aria-label="Create new note">
+          <Plus size={22} strokeWidth={1.8} aria-hidden="true" />
+        </button>
+      )}
     </aside>
   );
 }
@@ -109,16 +172,7 @@ interface NotesEditorProps {
   readonly?: boolean;
 }
 
-function NotesEditor({
-  selectedId,
-  title,
-  content,
-  onTitleChange,
-  onContentChange,
-  createdAt,
-  updatedAt,
-  readonly = false
-}: NotesEditorProps) {
+function NotesEditor({ selectedId, title, content, onTitleChange, onContentChange, createdAt, updatedAt, readonly = false }: NotesEditorProps) {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
@@ -176,28 +230,36 @@ function NotesEditor({
             aria-label="Note content"
             readOnly={readonly}
           />
-          {scrollbar.visible && <div className="notes-scrollbar" aria-hidden="true">
-            <div
-              className="notes-scrollbar-thumb"
-              style={{ height: scrollbar.length, transform: `translateY(${scrollbar.offset}px)` }}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.currentTarget.setPointerCapture(event.pointerId);
-                scrollbarDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: contentRef.current?.scrollTop ?? 0 };
-              }}
-              onPointerMove={dragScrollbar}
-              onPointerUp={(event) => {
-                if (scrollbarDragRef.current?.pointerId === event.pointerId) scrollbarDragRef.current = null;
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }}
-              onPointerCancel={() => { scrollbarDragRef.current = null; }}
-            />
-          </div>}
+          {scrollbar.visible && (
+            <div className="notes-scrollbar" aria-hidden="true">
+              <div
+                className="notes-scrollbar-thumb"
+                style={{ height: scrollbar.length, transform: `translateY(${scrollbar.offset}px)` }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  scrollbarDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: contentRef.current?.scrollTop ?? 0 };
+                }}
+                onPointerMove={dragScrollbar}
+                onPointerUp={(event) => {
+                  if (scrollbarDragRef.current?.pointerId === event.pointerId) scrollbarDragRef.current = null;
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onPointerCancel={() => {
+                  scrollbarDragRef.current = null;
+                }}
+              />
+            </div>
+          )}
         </div>
       </section>
       <footer className="notes-statusbar">
-        <span className="notes-stats">Lines: {contentStats.lines} · Characters: {contentStats.characters} · Size: {contentStats.size}</span>
-        <span className="notes-meta">Last edited: {formatNoteDate(updatedAt)} · Created: {formatNoteDate(createdAt)}</span>
+        <span className="notes-stats">
+          Lines: {contentStats.lines} · Characters: {contentStats.characters} · Size: {contentStats.size}
+        </span>
+        <span className="notes-meta">
+          Last edited: {formatNoteDate(updatedAt)} · Created: {formatNoteDate(createdAt)}
+        </span>
       </footer>
     </div>
   );
@@ -221,6 +283,8 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
     selectedNote,
     selectedNoteId,
     searchQuery,
+    sortMode,
+    setSortMode,
     draftTitle,
     draftContent,
     setSearchQuery,
@@ -253,23 +317,23 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
     };
   }, []);
 
-  const startDeleteNote = (noteId: string) => {
+  const startDeleteNote = useCallback((noteId: string) => {
     setActiveDeleteNoteId(noteId);
-  };
+  }, []);
 
   const cancelDeleteNote = () => {
     setActiveDeleteNoteId(null);
   };
 
-  const confirmDeleteNote = (noteId: string) => {
-    deleteNote(noteId);
-    setActiveDeleteNoteId(null);
-  };
-
-  const listItems = useMemo(
-    () => filteredNotes.map((note) => ({ id: note.id, title: note.title, updatedAt: note.updatedAt })),
-    [filteredNotes]
+  const confirmDeleteNote = useCallback(
+    (noteId: string) => {
+      deleteNote(noteId);
+      setActiveDeleteNoteId(null);
+    },
+    [deleteNote]
   );
+
+  const listItems = useMemo(() => filteredNotes.map((note) => ({ id: note.id, title: note.title, updatedAt: note.updatedAt })), [filteredNotes]);
 
   useEffect(() => {
     if (!activeDeleteNoteId) return;
@@ -281,15 +345,12 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      const isEditable =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable;
+      const isEditable = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
       const inNotesPanel = windowRef.current?.contains(event.target as Node) ?? false;
       if (!inNotesPanel || event.defaultPrevented) return;
 
       if (event.key === "Tab" && windowRef.current) {
-        const focusable = Array.from(windowRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+        const focusable = focusableElements(windowRef.current);
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (first && last && event.shiftKey && document.activeElement === first) {
@@ -343,6 +404,8 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
           notes={listItems}
           selectedId={selectedNoteId}
           query={searchQuery}
+          sortMode={sortMode}
+          onSortChange={setSortMode}
           onQueryChange={setSearchQuery}
           onSelect={(noteId) => {
             if (activeDeleteNoteId !== null) cancelDeleteNote();
@@ -370,7 +433,9 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
             updatedAt={selectedNote?.updatedAt ?? ""}
             readonly={readonly}
           />
-        ) : <NotesEmptyState />}
+        ) : (
+          <NotesEmptyState />
+        )}
       </div>
     </div>
   );

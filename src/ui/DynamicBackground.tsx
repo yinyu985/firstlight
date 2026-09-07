@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
 import type { DynamicBackground as DynamicBackgroundSettings } from "../shared/model";
 import type { DynamicEffect } from "../shared/dynamicEffects";
-import { NeuroNoise } from "./backgrounds/NeuroNoise";
+const NeuroNoise = lazy(() => import("./backgrounds/NeuroNoise").then((module) => ({ default: module.NeuroNoise })));
 
 const DotGrid = lazy(() => import("./backgrounds/DotGrid").then((module) => ({ default: module.DotGrid })));
 const Galaxy = lazy(() => import("./backgrounds/Galaxy").then((module) => ({ default: module.Galaxy })));
@@ -341,9 +341,13 @@ function parseColorChannel(value: string | undefined): number | null {
 function parseHexToLinearRgb(hex: string): [number, number, number] | null {
   const value = hex.trim();
   const source = value.startsWith("#") ? value.slice(1) : value;
-  const normalized = source.length === 3
-    ? source.split("").map((character) => `${character}${character}`).join("")
-    : source;
+  const normalized =
+    source.length === 3
+      ? source
+          .split("")
+          .map((character) => `${character}${character}`)
+          .join("")
+      : source;
   if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
   const red = parseColorChannel(normalized.slice(0, 2));
   const green = parseColorChannel(normalized.slice(2, 4));
@@ -378,9 +382,7 @@ export function dynamicTimeScale(speed: number): number {
 
 export function resolveCellWallThickness(parameters: DynamicBackgroundSettings["parameters"]): number {
   const value = parameters?.wallThickness;
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0.3, Math.min(2.5, value))
-    : 1;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0.3, Math.min(2.5, value)) : 1;
 }
 
 export function resolveSmokeSettings(parameters: DynamicBackgroundSettings["parameters"]): {
@@ -389,9 +391,7 @@ export function resolveSmokeSettings(parameters: DynamicBackgroundSettings["para
   spread: number;
   turbulence: number;
 } {
-  const numberOr = (value: unknown, fallback: number): number => (
-    typeof value === "number" && Number.isFinite(value) ? value : fallback
-  );
+  const numberOr = (value: unknown, fallback: number): number => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
   return {
     density: Math.max(0.35, Math.min(1.5, numberOr(parameters?.density, 0.9))),
     smokeCount: Math.max(1, Math.min(6, Math.round(numberOr(parameters?.smokeCount, 4)))),
@@ -489,11 +489,11 @@ function destroyRenderer(renderer: Renderer | null): void {
 function createSeed(): [number, number] {
   if (typeof crypto === "undefined" || !crypto.getRandomValues) {
     const fallback = Math.random() * 0xffffffff;
-    return [fallback / 0xffffffff * 97, Math.random() * 97];
+    return [(fallback / 0xffffffff) * 97, Math.random() * 97];
   }
   const values = new Uint32Array(2);
   crypto.getRandomValues(values);
-  return [values[0] / 0xffffffff * 97, values[1] / 0xffffffff * 97];
+  return [(values[0] / 0xffffffff) * 97, (values[1] / 0xffffffff) * 97];
 }
 
 function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgroundSettings }) {
@@ -543,12 +543,14 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
       const pixelBudget = background.effect === "smoke" ? 1_200_000 : 3_000_000;
       const pixelBudgetRatio = Math.sqrt(pixelBudget / Math.max(1, cssWidth * cssHeight));
       const maxViewport = renderer.gl.getParameter(renderer.gl.MAX_VIEWPORT_DIMS);
-      const maxViewportWidth = (typeof maxViewport === "object" && maxViewport !== null && 0 in maxViewport && 1 in maxViewport)
-        ? (maxViewport as ArrayLike<number>)[0]
-        : window.innerWidth;
-      const maxViewportHeight = (typeof maxViewport === "object" && maxViewport !== null && 0 in maxViewport && 1 in maxViewport)
-        ? (maxViewport as ArrayLike<number>)[1]
-        : window.innerHeight;
+      const maxViewportWidth =
+        typeof maxViewport === "object" && maxViewport !== null && 0 in maxViewport && 1 in maxViewport
+          ? (maxViewport as ArrayLike<number>)[0]
+          : window.innerWidth;
+      const maxViewportHeight =
+        typeof maxViewport === "object" && maxViewport !== null && 0 in maxViewport && 1 in maxViewport
+          ? (maxViewport as ArrayLike<number>)[1]
+          : window.innerHeight;
       const viewportRatio = Math.min(maxViewportWidth / cssWidth, maxViewportHeight / cssHeight);
       const qualityRatio = Math.max(0.5, Math.min(2, nativeRatio, pixelBudgetRatio));
       const pixelRatio = Math.max(0.1, Math.min(qualityRatio, viewportRatio));
@@ -576,7 +578,7 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
 
       const { gl, program, position, uniforms } = renderer;
       const config = frameConfigRef.current;
-      const effectAngle = background.effect === "smoke" ? 0 : config.angle * Math.PI / 180;
+      const effectAngle = background.effect === "smoke" ? 0 : (config.angle * Math.PI) / 180;
       gl.useProgram(program);
       gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
       gl.enableVertexAttribArray(position);
@@ -645,7 +647,11 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
 export function DynamicBackground({ background }: Props) {
   const parameters = background.parameters ?? EMPTY_PARAMETERS;
   if (background.effect === "neuroNoise") {
-    return <NeuroNoise className="dynamic-background" speed={background.speed} parameters={parameters} />;
+    return (
+      <Suspense fallback={null}>
+        <NeuroNoise className="dynamic-background" speed={background.speed} parameters={parameters} />
+      </Suspense>
+    );
   }
 
   const effectProps = {
@@ -654,11 +660,41 @@ export function DynamicBackground({ background }: Props) {
     speed: background.speed,
     parameters
   };
-  if (background.effect === "flash") return <Suspense fallback={null}><Flash className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "silk") return <Suspense fallback={null}><SilkFlow className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "dotGrid") return <Suspense fallback={null}><DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} /></Suspense>;
-  if (background.effect === "lightPillar") return <Suspense fallback={null}><LightPillar className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "galaxy") return <Suspense fallback={null}><Galaxy className="dynamic-background" {...effectProps} /></Suspense>;
-  if (background.effect === "snow") return <Suspense fallback={null}><Snow className="dynamic-background" {...effectProps} /></Suspense>;
+  if (background.effect === "flash")
+    return (
+      <Suspense fallback={null}>
+        <Flash className="dynamic-background" {...effectProps} />
+      </Suspense>
+    );
+  if (background.effect === "silk")
+    return (
+      <Suspense fallback={null}>
+        <SilkFlow className="dynamic-background" {...effectProps} />
+      </Suspense>
+    );
+  if (background.effect === "dotGrid")
+    return (
+      <Suspense fallback={null}>
+        <DotGrid className="dynamic-background dynamic-background-interactive" {...effectProps} />
+      </Suspense>
+    );
+  if (background.effect === "lightPillar")
+    return (
+      <Suspense fallback={null}>
+        <LightPillar className="dynamic-background" {...effectProps} />
+      </Suspense>
+    );
+  if (background.effect === "galaxy")
+    return (
+      <Suspense fallback={null}>
+        <Galaxy className="dynamic-background" {...effectProps} />
+      </Suspense>
+    );
+  if (background.effect === "snow")
+    return (
+      <Suspense fallback={null}>
+        <Snow className="dynamic-background" {...effectProps} />
+      </Suspense>
+    );
   return <WebGlDynamicBackground background={background} />;
 }

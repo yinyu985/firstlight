@@ -34,5 +34,4 @@ describe("deriveFolderTheme", () => {
     expect(first.surface).toMatch(/^rgba\(/);
     expect(second.surface).toBe(first.surface);
   });
-
 });
