@@ -7,6 +7,7 @@ const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8")
 const workerPath = resolve(root, manifest.background?.service_worker ?? "");
 
 if (manifest.version !== packageJson.version) throw new Error("Manifest version must match package.json");
+if (manifest.minimum_chrome_version !== "120") throw new Error("Manifest minimum Chrome version must match the build target");
 for (const permission of ["alarms", "bookmarks", "storage", "unlimitedStorage"]) {
   if (!manifest.permissions?.includes(permission)) throw new Error(`Manifest permission is missing: ${permission}`);
 }

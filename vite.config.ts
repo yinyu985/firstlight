@@ -3,11 +3,14 @@ import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import packageJson from "./package.json";
+import { build as buildScript } from "esbuild";
+import { cloudflareHeaders, COMMON_HEADERS, pageCsp } from "./hosting";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 const manifest = {
   manifest_version: 3,
+  minimum_chrome_version: "120",
   name: "Firstlight",
   version: packageJson.version,
   description: "A compact new tab powered by Chrome Bookmarks",
@@ -38,26 +41,67 @@ const manifest = {
 export default defineConfig(({ mode }) => {
   const extension = mode === "extension";
   const plugins: PluginOption[] = [react()];
-  if (extension) plugins.push({
-    name: "firstlight-manifest",
-    generateBundle() {
-      this.emitFile({
-        type: "asset",
-        fileName: "manifest.json",
-        source: JSON.stringify(manifest, null, 2)
-      });
-    }
-  });
-  if (extension) plugins.push({
-    name: "firstlight-extension-html",
-    enforce: "post",
-    transformIndexHtml: {
-      order: "post",
-      handler(html) {
-        return html.replace(/\s+crossorigin(?:="[^"]*")?/g, "");
+  if (!extension) {
+    const rendererScript = async () =>
+      (
+        await buildScript({
+          entryPoints: [resolve(rootDir, "src/data-renderer.ts")],
+          bundle: true,
+          write: false,
+          format: "iife",
+          target: "chrome120",
+          minify: true
+        })
+      ).outputFiles[0].text;
+    plugins.push({
+      name: "firstlight-online-security",
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          if (request.url?.split("?")[0] !== "/data-renderer.js") return next();
+          void rendererScript()
+            .then((script) => {
+              response.setHeader("Content-Type", "text/javascript");
+              response.end(script);
+            })
+            .catch(next);
+        });
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use((request, response, next) => {
+          for (const [key, value] of Object.entries(COMMON_HEADERS)) response.setHeader(key, value);
+          const csp = pageCsp((request.url ?? "/").split("?")[0]);
+          if (csp) response.setHeader("Content-Security-Policy", csp);
+          next();
+        });
+      },
+      async generateBundle() {
+        this.emitFile({ type: "asset", fileName: "data-renderer.js", source: await rendererScript() });
+        this.emitFile({ type: "asset", fileName: "_headers", source: cloudflareHeaders() });
       }
-    }
-  });
+    });
+  }
+  if (extension)
+    plugins.push({
+      name: "firstlight-manifest",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "manifest.json",
+          source: JSON.stringify(manifest, null, 2)
+        });
+      }
+    });
+  if (extension)
+    plugins.push({
+      name: "firstlight-extension-html",
+      enforce: "post",
+      transformIndexHtml: {
+        order: "post",
+        handler(html) {
+          return html.replace(/\s+crossorigin(?:="[^"]*")?/g, "");
+        }
+      }
+    });
   const input: Record<string, string> = extension
     ? {
         newtab: resolve(rootDir, "newtab.html")
@@ -80,13 +124,14 @@ export default defineConfig(({ mode }) => {
       __FIRSTLIGHT_TARGET__: JSON.stringify(extension ? "extension" : "online")
     },
     build: {
-      modulePreload: false,
+      target: "chrome120",
+      modulePreload: extension ? false : { polyfill: false },
       outDir: extension ? "dist/extension" : "dist/online",
       emptyOutDir: true,
       rollupOptions: {
         input,
         output: {
-          entryFileNames: (chunk) => extension && chunk.name === "background" ? "background.js" : "assets/[name]-[hash].js",
+          entryFileNames: (chunk) => (extension && chunk.name === "background" ? "background.js" : "assets/[name]-[hash].js"),
           chunkFileNames: "assets/[name]-[hash].js",
           assetFileNames: "assets/[name]-[hash][extname]",
           manualChunks: extension ? (id) => manualChunks(id) : manualChunks

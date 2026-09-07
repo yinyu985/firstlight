@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  font:
+    16px/1.7 system-ui,
+    sans-serif;
+  background: #0b1216;
+  color: #dce7e3;
+}
+body {
+  max-width: 780px;
+  margin: auto;
+  padding: 48px 24px;
+}
+h1,
+h2 {
+  line-height: 1.3;
+}
+h2 {
+  margin-top: 36px;
+}
+a {
+  color: #74d8c1;
+}
+a:focus-visible {
+  outline: 2px solid #74d8c1;
+  outline-offset: 3px;
+}
+code {
+  overflow-wrap: anywhere;
+}
+li {
+  margin-block: 8px;
+}

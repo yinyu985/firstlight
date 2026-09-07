@@ -47,11 +47,7 @@ export interface SelectParameterDefinition {
   options: readonly SelectParameterOption[];
 }
 
-export type DynamicEffectParameterDefinition =
-  | RangeParameterDefinition
-  | ColorParameterDefinition
-  | ToggleParameterDefinition
-  | SelectParameterDefinition;
+export type DynamicEffectParameterDefinition = RangeParameterDefinition | ColorParameterDefinition | ToggleParameterDefinition | SelectParameterDefinition;
 
 export interface DynamicSpeedSpec {
   min: number;
@@ -73,20 +69,9 @@ export interface DynamicEffectDefinition {
   defaultParameters: DynamicEffectParameters;
 }
 
-export const DYNAMIC_EFFECTS = [
-  "flow",
-  "silk",
-  "smoke",
-  "cells",
-  "flash",
-  "dotGrid",
-  "lightPillar",
-  "galaxy",
-  "snow",
-  "neuroNoise"
-] as const;
+export const DYNAMIC_EFFECTS = ["flow", "silk", "smoke", "cells", "flash", "dotGrid", "lightPillar", "galaxy", "snow", "neuroNoise"] as const;
 
-export type DynamicEffect = typeof DYNAMIC_EFFECTS[number];
+export type DynamicEffect = (typeof DYNAMIC_EFFECTS)[number];
 
 const FLOW_SPEC: DynamicEffectDefinition = {
   id: "flow",
@@ -99,7 +84,14 @@ const FLOW_SPEC: DynamicEffectDefinition = {
 };
 
 const range = (key: string, label: string, min: number, max: number, step: number, defaultValue: number, integer = false): RangeParameterDefinition => ({
-  kind: "range", key, label, min, max, step, defaultValue, integer
+  kind: "range",
+  key,
+  label,
+  min,
+  max,
+  step,
+  defaultValue,
+  integer
 });
 const hiddenRange = (key: string, label: string, min: number, max: number, step: number, defaultValue: number, integer = false): RangeParameterDefinition => ({
   ...range(key, label, min, max, step, defaultValue, integer),
@@ -107,11 +99,16 @@ const hiddenRange = (key: string, label: string, min: number, max: number, step:
 });
 const color = (key: string, label: string, defaultValue: string): ColorParameterDefinition => ({ kind: "color", key, label, defaultValue });
 const toggle = (key: string, label: string, defaultValue: boolean): ToggleParameterDefinition => ({ kind: "toggle", key, label, defaultValue });
-const select = (key: string, label: string, defaultValue: string, options: readonly SelectParameterOption[]): SelectParameterDefinition => ({ kind: "select", key, label, defaultValue, options });
+const select = (key: string, label: string, defaultValue: string, options: readonly SelectParameterOption[]): SelectParameterDefinition => ({
+  kind: "select",
+  key,
+  label,
+  defaultValue,
+  options
+});
 const withHint = <T extends DynamicEffectParameterDefinition>(definition: T, hint: string): T => ({ ...definition, hint });
-const defaultsFor = (parameters: readonly DynamicEffectParameterDefinition[]): DynamicEffectParameters => Object.fromEntries(
-  parameters.map((parameter) => [parameter.key, parameter.defaultValue])
-) as DynamicEffectParameters;
+const defaultsFor = (parameters: readonly DynamicEffectParameterDefinition[]): DynamicEffectParameters =>
+  Object.fromEntries(parameters.map((parameter) => [parameter.key, parameter.defaultValue])) as DynamicEffectParameters;
 const effectSpec = (
   id: DynamicEffect,
   label: string,
@@ -137,9 +134,7 @@ export const SILK_DEFAULT_COLORS = {
   silk: "#48b676"
 } as const;
 
-const CELLS_PARAMETERS = [
-  withHint(range("wallThickness", "边界粗细", 0.3, 2.5, 0.05, 1), "控制每个细胞形状之间的分界线宽度")
-] as const;
+const CELLS_PARAMETERS = [withHint(range("wallThickness", "边界粗细", 0.3, 2.5, 0.05, 1), "控制每个细胞形状之间的分界线宽度")] as const;
 
 const SMOKE_PARAMETERS = [
   withHint(range("smokeCount", "烟雾层数", 1, 6, 1, 4, true), "控制同时出现多少股烟雾"),
@@ -210,7 +205,7 @@ const GALAXY_PARAMETERS = [
   withHint(range("rotationSpeed", "自动旋转速度", -1, 1, 0.01, 0.1), "正负数控制不同旋转方向，0 表示不旋转"),
   withHint(range("repulsionStrength", "鼠标推力", 0, 5, 0.1, 2), "鼠标推开星河时的力度"),
   withHint(range("autoCenterRepulsion", "中心向外推力", 0, 5, 0.1, 0), "从画面中心持续推开星河；大于 0 时中心推力优先，鼠标跟随和鼠标推开暂时不生效"),
-  withHint(toggle("transparent", "透明背景", true), "打开后透出下面设置的背景颜色"),
+  withHint(toggle("transparent", "透明背景", true), "打开后透出下面设置的背景颜色")
 ] as const;
 
 export const GALAXY_DEFAULT_COLORS = {
@@ -227,11 +222,14 @@ const SNOW_PARAMETERS = [
   withHint(range("brightness", "雪花亮度", 0.2, 3, 0.1, 3), "控制所有雪花的整体亮度"),
   withHint(range("gamma", "暗部提亮程度", 0.1, 1, 0.05, 1), "1 保持原始明暗；数值越小，较暗的雪花越亮"),
   withHint(range("density", "雪花密度", 0.1, 1, 0.05, 0.5), "控制空间中出现雪花的概率"),
-  withHint(select("variant", "雪花形状", "snowflake", [
-    { value: "square", label: "方块" },
-    { value: "round", label: "圆点" },
-    { value: "snowflake", label: "雪花" }
-  ]), "选择每一片雪使用方块、圆点或六角雪花造型"),
+  withHint(
+    select("variant", "雪花形状", "snowflake", [
+      { value: "square", label: "方块" },
+      { value: "round", label: "圆点" },
+      { value: "snowflake", label: "雪花" }
+    ]),
+    "选择每一片雪使用方块、圆点或六角雪花造型"
+  ),
   withHint(range("direction", "风向角度", 0, 360, 5, 90, true), "控制雪花整体飘动的方向")
 ] as const;
 
@@ -255,14 +253,54 @@ const NEURO_NOISE_PARAMETERS = [
   withHint(range("rotation", "纹理旋转角度", -180, 180, 1, 0), "控制整片神经纹理的朝向")
 ] as const;
 
-const FLASH_SPEC = effectSpec("flash", "FLASH", { min: 1, max: 50, step: 1, defaultValue: 25, integer: true, label: "换色速度", hint: "控制鼠标轨迹换成下一种彩虹颜色的快慢" }, FLASH_PARAMETERS);
-const SILK_SPEC = effectSpec("silk", "FLOW II", { min: 0, max: 20, step: 0.1, defaultValue: 9, label: "流动速度", hint: "控制丝绸褶皱向前流动的快慢" }, SILK_PARAMETERS);
-const DOT_GRID_SPEC = effectSpec("dotGrid", "DOT", { min: 5, max: 22, step: 0.05, defaultValue: 10, label: "位移强度", hint: "控制鼠标快速划过时圆点被甩开的幅度" }, DOT_GRID_PARAMETERS);
-const LIGHT_PILLAR_SPEC = effectSpec("lightPillar", "PILLAR", { min: 0.05, max: 2, step: 0.05, defaultValue: 0.3, label: "流动速度", hint: "控制光线在光柱中流动的快慢" }, LIGHT_PILLAR_PARAMETERS);
-const GALAXY_SPEC = effectSpec("galaxy", "GALAXY", { min: 0.1, max: 3, step: 0.05, defaultValue: 1, label: "整体动画速度", hint: "统一加快或减慢星河的推进、闪烁和漂移" }, GALAXY_PARAMETERS);
-const SNOW_SPEC = effectSpec("snow", "SNOW", { min: 0.1, max: 5, step: 0.25, defaultValue: 1.35, label: "飘落速度", hint: "控制雪花穿过画面的整体速度" }, SNOW_PARAMETERS);
-const NEURO_NOISE_SPEC = effectSpec("neuroNoise", "NEURO", { min: 0, max: 4, step: 0.01, defaultValue: 1, label: "流动速度", hint: "控制神经纹理持续变化的快慢；0 表示静止" }, NEURO_NOISE_PARAMETERS);
-const SMOKE_SPEC = effectSpec("smoke", "SMOKE", { min: 10, max: 20, step: 1, defaultValue: 12, integer: true, label: "飘动速度", hint: "控制烟雾整体向上流动的快慢" }, SMOKE_PARAMETERS);
+const FLASH_SPEC = effectSpec(
+  "flash",
+  "FLASH",
+  { min: 1, max: 50, step: 1, defaultValue: 25, integer: true, label: "换色速度", hint: "控制鼠标轨迹换成下一种彩虹颜色的快慢" },
+  FLASH_PARAMETERS
+);
+const SILK_SPEC = effectSpec(
+  "silk",
+  "FLOW II",
+  { min: 0, max: 20, step: 0.1, defaultValue: 9, label: "流动速度", hint: "控制丝绸褶皱向前流动的快慢" },
+  SILK_PARAMETERS
+);
+const DOT_GRID_SPEC = effectSpec(
+  "dotGrid",
+  "DOT",
+  { min: 5, max: 22, step: 0.05, defaultValue: 10, label: "位移强度", hint: "控制鼠标快速划过时圆点被甩开的幅度" },
+  DOT_GRID_PARAMETERS
+);
+const LIGHT_PILLAR_SPEC = effectSpec(
+  "lightPillar",
+  "PILLAR",
+  { min: 0.05, max: 2, step: 0.05, defaultValue: 0.3, label: "流动速度", hint: "控制光线在光柱中流动的快慢" },
+  LIGHT_PILLAR_PARAMETERS
+);
+const GALAXY_SPEC = effectSpec(
+  "galaxy",
+  "GALAXY",
+  { min: 0.1, max: 3, step: 0.05, defaultValue: 1, label: "整体动画速度", hint: "统一加快或减慢星河的推进、闪烁和漂移" },
+  GALAXY_PARAMETERS
+);
+const SNOW_SPEC = effectSpec(
+  "snow",
+  "SNOW",
+  { min: 0.1, max: 5, step: 0.25, defaultValue: 1.35, label: "飘落速度", hint: "控制雪花穿过画面的整体速度" },
+  SNOW_PARAMETERS
+);
+const NEURO_NOISE_SPEC = effectSpec(
+  "neuroNoise",
+  "NEURO",
+  { min: 0, max: 4, step: 0.01, defaultValue: 1, label: "流动速度", hint: "控制神经纹理持续变化的快慢；0 表示静止" },
+  NEURO_NOISE_PARAMETERS
+);
+const SMOKE_SPEC = effectSpec(
+  "smoke",
+  "SMOKE",
+  { min: 10, max: 20, step: 1, defaultValue: 12, integer: true, label: "飘动速度", hint: "控制烟雾整体向上流动的快慢" },
+  SMOKE_PARAMETERS
+);
 
 export const DYNAMIC_EFFECT_DEFINITIONS: readonly DynamicEffectDefinition[] = [
   FLOW_SPEC,
@@ -277,7 +315,10 @@ export const DYNAMIC_EFFECT_DEFINITIONS: readonly DynamicEffectDefinition[] = [
   NEURO_NOISE_SPEC
 ];
 
-const registry = Object.fromEntries(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => [definition.id, definition])) as Record<DynamicEffect, DynamicEffectDefinition>;
+const registry = Object.fromEntries(DYNAMIC_EFFECT_DEFINITIONS.map((definition) => [definition.id, definition])) as Record<
+  DynamicEffect,
+  DynamicEffectDefinition
+>;
 
 export const FALLBACK_DYNAMIC_EFFECT: DynamicEffect = "flow";
 
@@ -307,9 +348,7 @@ export function defaultDynamicParameters(effect: DynamicEffect): DynamicEffectPa
 
 export function normalizeDynamicParameters(effect: DynamicEffect, raw: unknown): DynamicEffectParameters {
   const definition = getDynamicEffectDefinition(effect);
-  const rawParameters = typeof raw === "object" && raw !== null && !Array.isArray(raw)
-    ? raw as Record<string, unknown>
-    : undefined;
+  const rawParameters = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
   const parameters: DynamicEffectParameters = {};
   for (const parameter of definition.parameters) {
     const value = rawParameters?.[parameter.key];
@@ -334,7 +373,7 @@ export function normalizeDynamicParameters(effect: DynamicEffect, raw: unknown):
       }
       case "select": {
         const options = new Set(parameter.options.map((option) => option.value));
-        parameters[parameter.key] = options.has(typeof value === "string" ? value : "") ? value as string : parameter.defaultValue;
+        parameters[parameter.key] = options.has(typeof value === "string" ? value : "") ? (value as string) : parameter.defaultValue;
         break;
       }
       default: {

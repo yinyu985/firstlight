@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'" />
+    <link rel="stylesheet" href="./help.css" />
+    <title>Firstlight 隐私政策</title>
+  </head>
+  <body>
+    <h1>Firstlight 隐私政策</h1>
+    <p>更新日期：2026-09-06。适用于此仓库构建的 Firstlight Chrome 扩展及 Online 网页版。</p>
+    <h2>处理哪些数据、用于什么</h2>
+    <p>
+      Firstlight 读取 Chrome 书签栏的名称、URL 和文件夹层级，处理你写入的 Notes、显示设置及 GitHub
+      Token。这些数据只用于书签展示、搜索、笔记、跨设备快照同步和恢复。Firstlight 不读取浏览历史或其他网站的表单内容，不包含广告、分析 SDK 或使用行为遥测。
+    </p>
+    <h2>存储与传输</h2>
+    <p>
+      扩展以 Chrome Bookmarks 为书签来源，将 Notes、设置、同步元数据、未完成对比及最近三份恢复点保存在浏览器本机。Token
+      默认放在扩展会话存储；用户明确勾选记住后保存在本地持久存储。Online 默认使用标签页会话存储保存 Token，勾选记住后使用
+      localStorage；显示设置和排序偏好保存在本地，远端快照不做长期缓存。
+    </p>
+    <p>
+      用户连接 GitHub 后，Token 直接发送到 api.github.com 或 gist.githubusercontent.com 用于鉴权。扩展将完整书签、Notes 和同步设置上传到用户账号下的 Secret
+      Gist；Token 不进入快照。Online 只读取 GitHub。Firstlight 没有用于接收 Token 或同步内容的自有后台。
+    </p>
+    <p>
+      GitHub 以及 Online 所在的托管服务商可能按各自政策记录请求元数据，例如 IP 和访问时间。用户打开书签后，该网页按自己的隐私政策处理访问数据；data:
+      书签也可能包含联网脚本。
+    </p>
+    <h2>限制用途</h2>
+    <p>
+      Firstlight
+      不出售用户数据，不将数据用于广告、信用判断或模型训练，不向与上述功能无关的第三方转移数据。开发者不通过本产品主动收集或人工阅读你的同步内容。对用户数据的使用遵守
+      Chrome Web Store User Data Policy，包括其 Limited Use 要求。
+    </p>
+    <h2>控制和删除</h2>
+    <p>
+      清空 Token 并点击 CLEAR 可断开连接并清除保存的凭证；在 GitHub 撤销 Token 才能使凭证失效。删除扩展会清除其本地存储，但不会删除 Chrome 书签或 GitHub
+      Gist。Online 本地数据可通过浏览器的网站数据设置清除。远端 Gist 和其历史记录由 GitHub 管理；删除请求需要在你的 GitHub 账号内操作。
+    </p>
+    <h2>安全边界与联系</h2>
+    <p>
+      本地持久存储不承诺磁盘加密。Secret Gist 不提供端到端加密；持有链接的人可能访问内容。共享设备建议使用会话模式并在使用后断开。Token
+      在设置中按产品设计直接显示，分享截图前应自行移除。
+    </p>
+    <p>隐私问题请通过扩展商店详情页中开发者提供的支持渠道联系维护者。不要发送 Token 或完整私人快照。</p>
+    <p><a href="./help.html">返回使用帮助</a></p>
+  </body>
+</html>

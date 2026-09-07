@@ -32,9 +32,7 @@ function extractContent(snapshot) {
     throw new Error("expected a JSON object with a notes array");
   }
 
-  const notesWithContent = snapshot.notes.filter(
-    (note) => note && typeof note === "object" && typeof note.content === "string"
-  );
+  const notesWithContent = snapshot.notes.filter((note) => note && typeof note === "object" && typeof note.content === "string");
 
   if (notesWithContent.length !== 1) {
     throw new Error(`expected exactly one note with string content, found ${notesWithContent.length}`);
@@ -65,9 +63,7 @@ if (!inputArg || inputArg === "-h" || inputArg === "--help") {
 } else {
   try {
     const inputPath = path.resolve(inputArg);
-    const outputPath = path.resolve(
-      outputArg ?? path.join(process.cwd(), `${path.basename(inputPath, path.extname(inputPath))}.patch`)
-    );
+    const outputPath = path.resolve(outputArg ?? path.join(process.cwd(), `${path.basename(inputPath, path.extname(inputPath))}.patch`));
 
     if (inputPath === outputPath) {
       throw new Error("input and output paths must be different");

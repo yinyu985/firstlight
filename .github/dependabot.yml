@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      codemirror:
+        patterns: ["@codemirror/*"]
+      react:
+        patterns: [react, react-dom, "@types/react*"]
+      testing:
+        patterns: [vitest, "@vitest/*", "@playwright/test", jsdom]
+        update-types: [minor, patch]
+      build:
+        patterns: [vite, "@vitejs/*", esbuild, typescript]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

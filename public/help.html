@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'" />
+    <link rel="stylesheet" href="./help.css" />
+    <title>Firstlight 使用帮助</title>
+  </head>
+  <body>
+    <h1>Firstlight 使用帮助</h1>
+    <p>Firstlight 扩展直接展示 Chrome 书签栏。连接 GitHub 后，书签、Notes 和显示设置会作为一个完整快照保存在你的 Secret Gist。Online 只读展示这个快照。</p>
+    <h2>连接 GitHub</h2>
+    <ol>
+      <li>
+        打开
+        <a href="https://github.com/settings/personal-access-tokens/new" rel="noreferrer">GitHub 的 fine-grained personal access token 页面</a
+        >，设置到期时间。账号权限只授予 Gists：扩展需要读写，Online 只需读取。不要授予仓库、组织或管理权限。如果使用 classic token，只勾选 <code>gist</code>。
+      </li>
+      <li>复制 Token，在 Firstlight 设置的 SYNC 中粘贴并保存。不要把 Token 发给他人、放进截图、网址或笔记。</li>
+      <li>
+        新连接默认仅保留当前会话。扩展在浏览器重启、扩展重载或更新后需要重新连接；Online 在该标签页会话结束后需要重新连接。只有勾选“Remember token on this
+        device”才会长期保存。旧版本已保存的 Token 会保留原来的长期保存选择；取消勾选后再次保存即可改为会话模式。
+      </li>
+      <li>扩展会自动寻找 Firstlight Gist；没有时立即用当前数据创建。存在多个时选择 GitHub 最近更新的一份。Online 不创建任何远端数据。</li>
+    </ol>
+    <h2>同步、冲突与恢复</h2>
+    <p>
+      连接建立后，本地连续 10 秒没有修改才自动上传。双方同时变化会打开 Diff，让你选择保留哪一份。USE LOCAL 用本机完整快照覆盖远端；USE REMOTE
+      用远端完整快照替换本机书签栏、Notes 和同步设置。这不是逐条合并。
+    </p>
+    <p>
+      UPLOAD
+      是明确的本机优先覆盖操作。拿不准时先用对比功能。恢复前保留最近三份内部恢复点，用于写入失败或中断时回滚。大快照会显示摘要，并提供本机/远端原文下载；摘要不代表所有差异已经展示。
+    </p>
+    <h2>断开与删除数据</h2>
+    <p>
+      清空 Token 输入框，点击 CLEAR，会清除 Firstlight 保存的 Token 并断开连接，不会删除你的 Chrome 书签、Notes 或 GitHub Gist。到
+      <a href="https://github.com/settings/tokens" rel="noreferrer">GitHub Token 设置</a>撤销 Token，才能使这份凭证在所有地方失效。远端快照需要你在 GitHub Gist
+      中主动删除；GitHub 可能保留历史版本，具体由其政策决定。
+    </p>
+    <h2>数据与书签页面</h2>
+    <p>Secret Gist 是非公开链接，不是端到端加密保险箱。拥有链接的人可能读取内容，GitHub 也会处理内容。请勿在同步笔记中保存密码、私钥或长期凭证。</p>
+    <p>
+      打开 data: 书签可能执行该书签自带的脚本并访问它指定的网站。Online 使用隔离来源的启动器打开，书签无法读取 Firstlight 的 Token。javascript:、file:、chrome:
+      及自定义协议会完整保存在快照中，但 Firstlight 不直接执行或打开。
+    </p>
+    <p><a href="./privacy.html">隐私政策</a> · <a href="https://docs.github.com/en/rest/gists/gists" rel="noreferrer">GitHub Gist API 与权限说明</a></p>
+  </body>
+</html>
