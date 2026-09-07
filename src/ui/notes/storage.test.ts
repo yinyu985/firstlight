@@ -23,6 +23,7 @@ describe("Notes local preferences", () => {
     }
   );
   it("handles disabled local storage", () => {
+    const dispatch = vi.spyOn(window, "dispatchEvent");
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("disabled");
     });
@@ -31,6 +32,7 @@ describe("Notes local preferences", () => {
       throw new Error("disabled");
     });
     expect(() => saveNotesSortMode("created-desc")).not.toThrow();
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "firstlight:ui-error", detail: expect.stringContaining("Unable to save Notes") }));
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("disabled");
     });

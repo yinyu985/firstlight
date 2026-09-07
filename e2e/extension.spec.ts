@@ -3,7 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { sampleSnapshot } from "./fixtures";
-import { GIST_DESCRIPTION, type Snapshot } from "../src/shared/model";
+import { expectFolderAttached, expectNotesMetadataVisible, expectNotesSortContained } from "./layoutAssertions";
+import { GIST_DESCRIPTION } from "../src/shared/model";
+import { decodeGistSnapshot, encodeGistSnapshot } from "../src/shared/notesEnvelope";
 
 test("starts the extension app", async () => {
   const extensionPath = resolve(import.meta.dirname, "../dist/extension");
@@ -18,11 +20,14 @@ test("starts the extension app", async () => {
     let [serviceWorker] = context.serviceWorkers();
     serviceWorker ??= await context.waitForEvent("serviceworker");
     const extensionId = new URL(serviceWorker.url()).host;
-    const page = await context.newPage();
+    // Reuse Chromium's startup tab so it cannot consume first-run setup in a
+    // different page before this test opens the extension.
+    const page = context.pages()[0] ?? (await context.newPage());
     const pageErrors: Error[] = [];
     page.on("pageerror", (error) => pageErrors.push(error));
 
-    await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+    const newTabUrl = `chrome-extension://${extensionId}/newtab.html`;
+    if (page.url() !== newTabUrl && !page.url().startsWith("chrome://newtab")) await page.goto(newTabUrl);
 
     await expect(page).toHaveTitle("Firstlight");
     await expect(page.getByRole("dialog", { name: "FIRSTLIGHT" })).toBeVisible();
@@ -33,8 +38,14 @@ test("starts the extension app", async () => {
     await page.evaluate(async () => {
       const tree = await chrome.bookmarks.getTree();
       await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "Regression bookmark", url: "https://example.test/regression" });
+      const folder = await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "Attached folder" });
+      await chrome.bookmarks.create({ parentId: folder.id, title: "Folder entry", url: "https://example.test/entry" });
     });
     await expect(page.getByRole("button", { name: "Regression bookmark", exact: false })).toBeVisible();
+    const folder = page.getByRole("button", { name: "Attached folder", exact: false });
+    await folder.click();
+    await expectFolderAttached(page, "bottom");
+    await folder.click();
     await page.getByRole("button", { name: "Open settings" }).click();
     await page.getByRole("button", { name: "Search text position" }).click();
     await page.getByRole("option", { name: "HIDE", exact: true }).click();
@@ -44,9 +55,16 @@ test("starts the extension app", async () => {
     await page.getByRole("button", { name: "Clear search" }).click();
 
     await page.getByRole("button", { name: "Open note panel" }).click();
+    await expectNotesSortContained(page);
+    await page.getByRole("group", { name: "Sort notes" }).getByRole("button", { name: "CREATED", exact: true }).click();
     await page.getByRole("button", { name: "Create new note" }).click();
     await page.getByRole("textbox", { name: "Note title" }).fill("Persistent note");
     await page.getByRole("textbox", { name: "Note content" }).fill("Last keystrokes survive closing");
+    await expectNotesMetadataVisible(page);
+    const initialViewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await expectNotesMetadataVisible(page);
+    await page.setViewportSize(initialViewport);
     await page.keyboard.press("Escape");
     await expect
       .poll(async () =>
@@ -59,6 +77,41 @@ test("starts the extension app", async () => {
     await page.reload();
     await page.getByRole("button", { name: "Open note panel" }).click();
     await expect(page.getByRole("textbox", { name: "Note content" })).toHaveValue("Last keystrokes survive closing");
+    // No debounce wait and no normal Notes close before the real page reload.
+    await page.getByRole("textbox", { name: "Note content" }).fill("Immediate refresh retains the last input");
+    await page.reload();
+    await page.getByRole("button", { name: "Open note panel" }).click();
+    await expect(page.getByRole("textbox", { name: "Note content" })).toHaveValue("Immediate refresh retains the last input");
+    const content = page.getByRole("textbox", { name: "Note content" });
+    // Seed the fixture through storage, then measure a real key in the existing
+    // large note; CDP bulk insertion is not the input-latency measurement.
+    await page.evaluate(async () => {
+      const { state } = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      await chrome.runtime.sendMessage({ type: "SAVE_NOTES", notes: [{ ...state.notes[0], content: ("Large note content ".repeat(60) + "\n").repeat(1000) }] });
+    });
+    await expect.poll(() => content.evaluate((node) => (node as HTMLTextAreaElement).value.length)).toBe(1_141_000);
+    await content.focus();
+    await content.evaluate((node) => {
+      const input = node as HTMLTextAreaElement;
+      input.setSelectionRange(input.value.length, input.value.length);
+      Object.assign(window, {
+        firstlightInputLatency: new Promise<number>((resolve) => {
+          input.addEventListener(
+            "beforeinput",
+            () => {
+              const started = performance.now();
+              requestAnimationFrame(() => resolve(performance.now() - started));
+            },
+            { once: true }
+          );
+        })
+      });
+    });
+    await page.keyboard.insertText("!");
+    const inputLatency = await page.evaluate(() => (window as typeof window & { firstlightInputLatency: Promise<number> }).firstlightInputLatency);
+    // A coarse regression guard, not a cross-hardware latency guarantee.
+    expect(inputLatency).toBeLessThan(1000);
+    await expect(content).toHaveValue(/!$/);
     await page.keyboard.press("Escape");
 
     await page.evaluate(async () => {
@@ -107,12 +160,14 @@ test("real extension diff restores remote data and uploads a reviewed local chan
     args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]
   });
   let snapshot = sampleSnapshot();
+  let content = await encodeGistSnapshot(snapshot, "firstlight-e2e-token");
   let uploads = 0;
   await context.route("https://api.github.com/**", async (route) => {
     expect(route.request().headers().authorization).toBe("Bearer firstlight-e2e-token");
     if (route.request().method() === "PATCH") {
       const body = route.request().postDataJSON() as { files: { "firstlight.json": { content: string } } };
-      snapshot = JSON.parse(body.files["firstlight.json"].content) as Snapshot;
+      content = body.files["firstlight.json"].content;
+      snapshot = (await decodeGistSnapshot(content, "firstlight-e2e-token")).snapshot;
       uploads += 1;
     }
     const gist = {
@@ -121,18 +176,25 @@ test("real extension diff restores remote data and uploads a reviewed local chan
       description: GIST_DESCRIPTION,
       html_url: "https://gist.github.com/fixture-gist",
       updated_at: "2026-08-03T02:00:00Z",
-      files: { "firstlight.json": { content: JSON.stringify(snapshot) } }
+      files: { "firstlight.json": { content } }
     };
     await route.fulfill({ json: new URL(route.request().url()).pathname === "/gists" ? [gist] : gist });
   });
   try {
     let [worker] = context.serviceWorkers();
     worker ??= await context.waitForEvent("serviceworker");
-    const page = await context.newPage();
+    const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(`chrome-extension://${new URL(worker.url()).host}/newtab.html`);
+    await expect(page.locator(".app")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Open settings" }).click();
     await page.getByRole("textbox", { name: "GitHub token" }).fill("firstlight-e2e-token");
     await page.getByRole("button", { name: "SAVE", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Snapshot comparison" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Snapshot comparison" }).getByRole("link", { name: "OPEN GIST" })).toHaveAttribute(
+      "href",
+      "https://gist.github.com/fixture-gist"
+    );
     await expect(page.locator(".cm-mergeView")).toBeVisible();
     await page.getByRole("button", { name: "USE REMOTE", exact: true }).click();
     await expect

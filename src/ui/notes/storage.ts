@@ -1,4 +1,5 @@
 import type { Note, NoteSortMode } from "./types";
+import { reportUiError } from "../uiErrors";
 
 const NOTES_KEY = "firstlight.notes.v1";
 
@@ -71,7 +72,7 @@ export function saveNotesState(state: StoredNotesState): void {
   try {
     window.localStorage.setItem(NOTES_KEY, JSON.stringify(state));
   } catch {
-    // Storage may be disabled; notes remain available for the current session.
+    reportUiError("Unable to save Notes preferences in this browser.");
   }
 }
 
@@ -85,6 +86,6 @@ export function clearNotesState(): void {
   try {
     window.localStorage.removeItem(NOTES_KEY);
   } catch {
-    // Nothing else can be cleared when storage access is denied.
+    reportUiError("Unable to clear Notes preferences in this browser.");
   }
 }

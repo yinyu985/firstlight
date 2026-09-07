@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { SyncNote } from "../../shared/model";
 import type { Note, NoteSortMode } from "./types";
 import { clearNotesState, loadNotesState, saveNotesSortMode, saveNotesState, type StoredNotesState } from "./storage";
@@ -9,6 +9,7 @@ const AUTO_SAVE_MS = 350;
 interface UseNotesOptions {
   initialNotes?: SyncNote[];
   onSave?: (notes: SyncNote[]) => void | Promise<void>;
+  onDraft?: (notes: SyncNote[]) => void;
   externalResetKey?: number;
 }
 
@@ -46,6 +47,31 @@ function toSyncNote(note: Note): SyncNote {
     createtime: note.createdAt,
     updatetime: note.updatedAt
   };
+}
+
+const payloads = new WeakMap<Note[], SyncNote[]>();
+function toSyncNotes(notes: Note[]): SyncNote[] {
+  let payload = payloads.get(notes);
+  if (!payload) {
+    payload = notes.map(toSyncNote);
+    payloads.set(notes, payload);
+  }
+  return payload;
+}
+
+function sameNotes(a: SyncNote[] | undefined, b: SyncNote[]): boolean {
+  return Boolean(
+    a &&
+    a.length === b.length &&
+    a.every(
+      (note, i) =>
+        note.id === b[i].id &&
+        note.name === b[i].name &&
+        note.content === b[i].content &&
+        note.createtime === b[i].createtime &&
+        note.updatetime === b[i].updatetime
+    )
+  );
 }
 
 function createNoteId(): string {
@@ -101,20 +127,19 @@ export interface NotesHook {
 }
 
 export function useNotes(options: UseNotesOptions = {}): NotesHook {
-  const { initialNotes, onSave, externalResetKey = 0 } = options;
+  const { initialNotes, onSave, onDraft, externalResetKey = 0 } = options;
   const [notes, setNotes] = useState<Note[]>([]);
   const [sortMode, setSortModeState] = useState<NoteSortMode>(() => normalizeSortMode(loadNotesState().sortMode));
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isReady, setIsReady] = useState(false);
   const [persistenceRevision, setPersistenceRevision] = useState(0);
-  const initialNotesVersionRef = useRef<string | null>(null);
-  const savedNotesVersionRef = useRef<string | null>(null);
+  const initialNotesVersionRef = useRef<SyncNote[] | undefined>(undefined);
+  const savedNotesRef = useRef<Note[] | undefined>(undefined);
+  const dirtyRef = useRef(false);
   const persistTimer = useRef<number | null>(null);
   const retryTimer = useRef<number | null>(null);
-  const inFlightVersionsRef = useRef(new Set<string>());
-  const submittedVersionsRef = useRef(new Set<string>());
-  const submittedVersionOrderRef = useRef<string[]>([]);
+  const inFlightVersionsRef = useRef(new WeakSet<Note[]>());
   const saveSequenceRef = useRef(0);
   const successfulSaveSequenceRef = useRef(0);
   const persistencePausedRef = useRef(false);
@@ -123,11 +148,13 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
   const selectedNoteIdRef = useRef<string | null>(null);
   const readyRenderedRef = useRef(false);
   const onSaveRef = useRef(onSave);
+  const onDraftRef = useRef(onDraft);
   const initialNotesRef = useRef(initialNotes);
   const sortModeRef = useRef(sortMode);
   notesRef.current = notes;
   selectedNoteIdRef.current = selectedNoteId;
   onSaveRef.current = onSave;
+  onDraftRef.current = onDraft;
   initialNotesRef.current = initialNotes;
   sortModeRef.current = sortMode;
   if (isReady) readyRenderedRef.current = true;
@@ -135,16 +162,11 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
   useEffect(() => {
     if (initialNotes !== undefined) {
       const syncNotes = initialNotes.filter(isValidSyncNote).map(toUiNote);
-      const version = JSON.stringify(initialNotes);
       const forcedReset = externalResetKey !== externalResetKeyRef.current;
       externalResetKeyRef.current = externalResetKey;
-      if (version === initialNotesVersionRef.current && !forcedReset) return;
-      initialNotesVersionRef.current = version;
-      const currentVersion = JSON.stringify(notesRef.current.map(toSyncNote));
-      const isOwnSaveEcho = submittedVersionsRef.current.has(version);
-      savedNotesVersionRef.current = version;
-      if (isOwnSaveEcho && currentVersion !== version && !persistencePausedRef.current && !forcedReset) {
-        initialNotesVersionRef.current = currentVersion;
+      if (sameNotes(initialNotesVersionRef.current, initialNotes) && !forcedReset) return;
+      initialNotesVersionRef.current = initialNotes;
+      if (dirtyRef.current && !persistencePausedRef.current && !forcedReset) {
         setIsReady(true);
         return;
       }
@@ -157,12 +179,13 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
         retryTimer.current = null;
       }
       if (persistencePausedRef.current || forcedReset) {
-        inFlightVersionsRef.current.clear();
-        submittedVersionsRef.current.clear();
-        submittedVersionOrderRef.current = [];
+        inFlightVersionsRef.current = new WeakSet();
+        successfulSaveSequenceRef.current = ++saveSequenceRef.current;
       }
       persistencePausedRef.current = false;
       notesRef.current = syncNotes;
+      savedNotesRef.current = syncNotes;
+      dirtyRef.current = false;
       setNotes(syncNotes);
       const currentSelection = selectedNoteIdRef.current;
       const nextSelection =
@@ -183,6 +206,7 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     });
 
     notesRef.current = stored.notes;
+    savedNotesRef.current = stored.notes;
     setNotes(stored.notes);
     setSortModeState(initialSortMode);
 
@@ -195,7 +219,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     setIsReady(true);
   }, [externalResetKey, initialNotes]);
 
-  const orderedNotes = useMemo(() => sortNotes(notes, sortMode), [notes, sortMode]);
+  const deferredNotes = useDeferredValue(notes);
+  const orderedNotes = useMemo(() => sortNotes(deferredNotes, sortMode), [deferredNotes, sortMode]);
 
   const query = searchQuery.trim().toLowerCase();
   const filteredNotes = useMemo(() => {
@@ -219,31 +244,21 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     }
     persistTimer.current = window.setTimeout(() => {
       persistTimer.current = null;
-      const payload = notes.map(toSyncNote);
-      const version = JSON.stringify(payload);
-      if (version === savedNotesVersionRef.current || inFlightVersionsRef.current.has(version)) return;
+      const payload = toSyncNotes(notes);
+      if (notes === savedNotesRef.current || inFlightVersionsRef.current.has(notes)) return;
       const sequence = ++saveSequenceRef.current;
-      inFlightVersionsRef.current.add(version);
-      if (!submittedVersionsRef.current.has(version)) {
-        submittedVersionsRef.current.add(version);
-        submittedVersionOrderRef.current.push(version);
-        if (submittedVersionOrderRef.current.length > 20) {
-          const oldest = submittedVersionOrderRef.current.shift();
-          if (oldest !== undefined) submittedVersionsRef.current.delete(oldest);
-        }
-      }
+      inFlightVersionsRef.current.add(notes);
       void Promise.resolve(onSave(payload))
         .then(() => {
-          inFlightVersionsRef.current.delete(version);
+          inFlightVersionsRef.current.delete(notes);
           if (sequence >= successfulSaveSequenceRef.current) {
             successfulSaveSequenceRef.current = sequence;
-            savedNotesVersionRef.current = version;
+            savedNotesRef.current = notes;
+            dirtyRef.current = notesRef.current !== notes;
           }
         })
         .catch(() => {
-          inFlightVersionsRef.current.delete(version);
-          submittedVersionsRef.current.delete(version);
-          submittedVersionOrderRef.current = submittedVersionOrderRef.current.filter((item) => item !== version);
+          inFlightVersionsRef.current.delete(notes);
           if (persistencePausedRef.current) return;
           if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
           retryTimer.current = window.setTimeout(() => {
@@ -268,8 +283,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     }, 120);
   }, [initialNotes, isReady, notes, sortMode, selectedNoteId, onSave]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const flush = () => {
       if (persistTimer.current !== null) window.clearTimeout(persistTimer.current);
       if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
       if (!readyRenderedRef.current || persistencePausedRef.current) return;
@@ -277,8 +292,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
       const latestNotes = notesRef.current;
       const latestOnSave = onSaveRef.current;
       if (latestOnSave) {
-        const payload = latestNotes.map(toSyncNote);
-        if (JSON.stringify(payload) !== savedNotesVersionRef.current) {
+        const payload = toSyncNotes(latestNotes);
+        if (dirtyRef.current && latestNotes !== savedNotesRef.current) {
           void Promise.resolve(latestOnSave(payload)).catch(() => undefined);
         }
       } else if (initialNotesRef.current === undefined) {
@@ -286,19 +301,30 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
         const selected = latestNotes.some((note) => note.id === selectedId) ? selectedId : null;
         saveNotesState({ notes: latestNotes, sortMode: sortModeRef.current, selectedNoteId: selected });
       }
-    },
-    []
-  );
+    };
+    window.addEventListener("pagehide", flush);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
+    };
+  }, []);
 
   const updateSelectedNote = useCallback((field: "title" | "content", value: string) => {
     const selectedId = selectedNoteIdRef.current;
     if (!selectedId) return;
     const timestamp = toEastEightTime();
-    setNotes((current) => {
-      const next = current.map((note) => (note.id === selectedId && note[field] !== value ? { ...note, [field]: value, updatedAt: timestamp } : note));
-      notesRef.current = next;
-      return next;
-    });
+    const current = notesRef.current;
+    if (!current.some((note) => note.id === selectedId && note[field] !== value)) return;
+    const next = current.map((note) => (note.id === selectedId ? { ...note, [field]: value, updatedAt: timestamp } : note));
+    notesRef.current = next;
+    dirtyRef.current = true;
+    onDraftRef.current?.(toSyncNotes(next));
+    setNotes(next);
   }, []);
 
   const setDraftTitle = useCallback((title: string) => updateSelectedNote("title", title), [updateSelectedNote]);
@@ -315,6 +341,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
     };
     const updated = [next, ...notesRef.current];
     notesRef.current = updated;
+    dirtyRef.current = true;
+    onDraftRef.current?.(toSyncNotes(updated));
     setNotes(updated);
     selectedNoteIdRef.current = next.id;
     setSelectedNoteId(next.id);
@@ -334,6 +362,8 @@ export function useNotes(options: UseNotesOptions = {}): NotesHook {
   const deleteNote = useCallback((noteId: string) => {
     const remaining = notesRef.current.filter((note) => note.id !== noteId);
     notesRef.current = remaining;
+    dirtyRef.current = true;
+    onDraftRef.current?.(toSyncNotes(remaining));
     setNotes(remaining);
     if (noteId === selectedNoteIdRef.current) {
       const next = sortNotes(remaining, sortModeRef.current)[0]?.id ?? null;

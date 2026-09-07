@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useDeferredValue,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -15,7 +16,6 @@ import type { SyncNote } from "../../shared/model";
 import { getNoteContentStats } from "./metrics";
 import { scrollbarMetrics, type ScrollbarMetrics } from "../scrollbar";
 import type { NoteSortMode } from "./types";
-import { Picker } from "../Picker";
 import { VirtualItems } from "../VirtualItems";
 import { focusableElements } from "../focus";
 
@@ -59,15 +59,27 @@ function NotesSidebar({
       <header className="notes-sidebar-header">
         <div className="notes-sidebar-title">
           <h2>Notes</h2>
-          <Picker
-            value={sortMode}
-            options={[
-              { value: "updated-desc", label: "MODIFIED" },
-              { value: "created-desc", label: "CREATED" }
-            ]}
-            label="Sort notes"
-            onChange={onSortChange}
-          />
+        </div>
+        <div className="setting-line notes-sort-row">
+          <label>SORT BY</label>
+          <div className="segmented" role="group" aria-label="Sort notes">
+            <button
+              type="button"
+              aria-pressed={sortMode === "updated-desc"}
+              className={sortMode === "updated-desc" ? "selected" : ""}
+              onClick={() => onSortChange("updated-desc")}
+            >
+              MODIFIED
+            </button>
+            <button
+              type="button"
+              aria-pressed={sortMode === "created-desc"}
+              className={sortMode === "created-desc" ? "selected" : ""}
+              onClick={() => onSortChange("created-desc")}
+            >
+              CREATED
+            </button>
+          </div>
         </div>
       </header>
 
@@ -177,7 +189,8 @@ function NotesEditor({ selectedId, title, content, onTitleChange, onContentChang
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
   const [scrollbar, setScrollbar] = useState<ScrollbarMetrics>({ visible: false, offset: 0, length: NOTES_SCROLLBAR_MAX_LENGTH });
-  const contentStats = useMemo(() => getNoteContentStats(content), [content]);
+  const measuredContent = useDeferredValue(content);
+  const contentStats = useMemo(() => getNoteContentStats(measuredContent), [measuredContent]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -255,10 +268,13 @@ function NotesEditor({ selectedId, title, content, onTitleChange, onContentChang
       </section>
       <footer className="notes-statusbar">
         <span className="notes-stats">
-          Lines: {contentStats.lines} · Characters: {contentStats.characters} · Size: {contentStats.size}
+          <span>Lines: {contentStats.lines}</span>
+          <span>Characters: {contentStats.characters}</span>
+          <span>Size: {contentStats.size}</span>
         </span>
         <span className="notes-meta">
-          Last edited: {formatNoteDate(updatedAt)} · Created: {formatNoteDate(createdAt)}
+          <span>Last edited: {formatNoteDate(updatedAt)}</span>
+          <span>Created: {formatNoteDate(createdAt)}</span>
         </span>
       </footer>
     </div>
@@ -268,6 +284,7 @@ function NotesEditor({ selectedId, title, content, onTitleChange, onContentChang
 interface NotesAppProps {
   initialNotes?: SyncNote[];
   onSave?: (notes: SyncNote[]) => void | Promise<void>;
+  onDraft?: (notes: SyncNote[]) => void;
   readonly?: boolean;
   externalResetKey?: number;
 }
@@ -277,7 +294,10 @@ export interface NotesAppHandle {
   resumePersistence: () => void;
 }
 
-export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function NotesApp({ initialNotes, onSave, readonly = false, externalResetKey }, ref) {
+export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function NotesApp(
+  { initialNotes, onSave, onDraft, readonly = false, externalResetKey },
+  ref
+) {
   const {
     filteredNotes,
     selectedNote,
@@ -296,12 +316,28 @@ export const NotesApp = forwardRef<NotesAppHandle, NotesAppProps>(function Notes
     pausePersistence,
     resumePersistence,
     hasNotes
-  } = useNotes({ initialNotes, onSave, externalResetKey });
+  } = useNotes({ initialNotes, onSave, onDraft, externalResetKey });
 
   useImperativeHandle(ref, () => ({ pausePersistence, resumePersistence }), [pausePersistence, resumePersistence]);
 
   const windowRef = useRef<HTMLDivElement>(null);
   const [activeDeleteNoteId, setActiveDeleteNoteId] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const panel = windowRef.current;
+    const editor = panel?.querySelector<HTMLElement>(".notes-editor");
+    if (!panel || !editor || readonly) return;
+    const alignNewButton = () => {
+      const borderBottom = Number.parseFloat(getComputedStyle(panel).borderBottomWidth) || 0;
+      const inset = `${Math.max(0, panel.getBoundingClientRect().bottom - borderBottom - editor.getBoundingClientRect().bottom)}px`;
+      if (panel.style.getPropertyValue("--notes-editor-bottom-inset") !== inset) panel.style.setProperty("--notes-editor-bottom-inset", inset);
+    };
+    alignNewButton();
+    const observer = new ResizeObserver(alignNewButton);
+    observer.observe(panel);
+    observer.observe(editor);
+    return () => observer.disconnect();
+  }, [hasNotes, selectedNoteId, readonly]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;

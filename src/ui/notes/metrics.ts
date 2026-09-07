@@ -16,10 +16,29 @@ export function formatFileSize(bytes: number): string {
 }
 
 export function getNoteContentStats(content: string): NoteContentStats {
-  const bytes = new TextEncoder().encode(content).byteLength;
+  let bytes = 0;
+  let characters = 0;
+  let lines = content.length ? 1 : 0;
+  for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
+    characters += 1;
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      index + 1 < content.length &&
+      content.charCodeAt(index + 1) >= 0xdc00 &&
+      content.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+    if (code === 13 || (code === 10 && content.charCodeAt(index - 1) !== 13)) lines += 1;
+  }
   return {
-    lines: content.length === 0 ? 0 : content.split(/\r\n|\r|\n/).length,
-    characters: Array.from(content).length,
+    lines,
+    characters,
     bytes,
     size: formatFileSize(bytes)
   };

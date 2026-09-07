@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { formatFileSize, getNoteContentStats } from "./metrics";
 
 describe("note content metrics", () => {
+  it("counts surrogate pairs, malformed surrogates and CRLF without allocating character arrays", () => {
+    const content = "😀\r\n你\rA\ud800";
+    const stats = getNoteContentStats(content);
+    expect(stats.characters).toBe(Array.from(content).length);
+    expect(stats.bytes).toBe(new TextEncoder().encode(content).byteLength);
+    expect(stats.lines).toBe(3);
+  });
   it("counts logical lines, Unicode characters, and UTF-8 bytes", () => {
     expect(getNoteContentStats("First\n你好")).toEqual({
       lines: 2,
