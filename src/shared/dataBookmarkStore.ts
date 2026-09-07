@@ -80,7 +80,27 @@ export async function consumeDataBookmark(id: string): Promise<string | null> {
       request.onerror = () => reject(request.error ?? new Error("Unable to read the data bookmark."));
     });
     await transactionDone(transaction);
-    return entry?.url ?? null;
+    return entry && Number.isFinite(entry.createdAt) && entry.createdAt >= Date.now() - ENTRY_TTL_MS ? entry.url : null;
+  } finally {
+    database.close();
+  }
+}
+
+export async function cleanDataBookmarks(removeId?: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    if (removeId) store.delete(removeId);
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const entry = cursor.value as DataBookmarkEntry;
+      if (!Number.isFinite(entry.createdAt) || entry.createdAt < Date.now() - ENTRY_TTL_MS) cursor.delete();
+      cursor.continue();
+    };
+    await transactionDone(transaction);
   } finally {
     database.close();
   }

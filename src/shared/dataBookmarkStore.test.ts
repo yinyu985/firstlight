@@ -1,9 +1,23 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
-import { consumeDataBookmark, dataBookmarkViewerUrl, stageDataBookmark } from "./dataBookmarkStore";
+import { cleanDataBookmarks, consumeDataBookmark, dataBookmarkViewerUrl, stageDataBookmark } from "./dataBookmarkStore";
 import { canOpenBookmark, isDataBookmarkUrl } from "./url";
 
 describe("data bookmark routing", () => {
+  it("rejects expired entries on consumption without requiring another write", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const id = crypto.randomUUID();
+    await stageDataBookmark(id, "data:text/plain,expired");
+    now.mockReturnValue(3_600_001);
+    await expect(consumeDataBookmark(id)).resolves.toBeNull();
+    now.mockRestore();
+  });
+  it("removes the staged payload when opening its viewer fails", async () => {
+    const id = crypto.randomUUID();
+    await stageDataBookmark(id, "data:text/plain,failed");
+    await cleanDataBookmarks(id);
+    await expect(consumeDataBookmark(id)).resolves.toBeNull();
+  });
   it("recognizes data URLs without treating lookalikes as data bookmarks", () => {
     expect(isDataBookmarkUrl("data:text/html,<title>Editor</title>")).toBe(true);
     expect(isDataBookmarkUrl("DATA:text/plain,hello")).toBe(true);
