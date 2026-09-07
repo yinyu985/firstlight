@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactElement } from "react";
 import { LIGHT_PILLAR_DEFAULT_COLORS } from "../../shared/dynamicEffects";
 import { boundedCanvasSize } from "./canvasSizing";
+import { createFrameGate } from "./frameBudget";
 
 // Adapted from React Bits LightPillar by David Haz.
 // See THIRD_PARTY_NOTICES.md for the applicable license and restriction.
@@ -299,6 +300,7 @@ export function LightPillar({
     let elapsed = 0;
     let lastFrame: number | null = null;
     let disposed = false;
+    const canDraw = createFrameGate(quality.targetFps);
 
     const resize = () => {
       if (disposed || !renderer) return;
@@ -325,8 +327,7 @@ export function LightPillar({
     const draw = (timestamp: number) => {
       animationFrame = null;
       if (disposed || !renderer || document.visibilityState === "hidden") return;
-      const minimumFrameTime = 1000 / quality.targetFps;
-      if (lastFrame !== null && timestamp - lastFrame < minimumFrameTime) {
+      if (!canDraw(timestamp)) {
         schedule();
         return;
       }

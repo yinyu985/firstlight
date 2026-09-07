@@ -1,3 +1,4 @@
+import { createFrameGate } from "./frameBudget";
 import { useEffect, useRef, type ReactElement } from "react";
 import { boundedCanvasSize } from "./canvasSizing";
 import { bindWindowPointer } from "./pointerTracking";
@@ -371,6 +372,7 @@ function destroyRenderer(renderer: Renderer | null): void {
 
 export function Galaxy({ className = "dynamic-background", speed = 1, parameters }: GalaxyProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const invalidateRef = useRef<(() => void) | null>(null);
   const mouseRef = useRef({ targetX: 0.5, targetY: 0.5, smoothX: 0.5, smoothY: 0.5, targetActive: 0, smoothActive: 0 });
   const runtimeRef = useRef<GalaxyRuntime>({
     ...resolveGalaxySettings(parameters),
@@ -390,6 +392,7 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
     let starPhase = 0;
     let lastFrame: number | null = null;
     let disposed = false;
+    const canDraw = createFrameGate();
 
     const resize = () => {
       if (disposed || !renderer) return;
@@ -405,6 +408,7 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
         canvas.height = height;
       }
       renderer.gl.viewport(0, 0, width, height);
+      invalidateRef.current?.();
     };
 
     const schedule = () => {
@@ -416,6 +420,10 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
     const draw = (timestamp: number) => {
       animationFrame = null;
       if (disposed || !renderer || document.visibilityState === "hidden") return;
+      if (!canDraw(timestamp)) {
+        schedule();
+        return;
+      }
       const delta = lastFrame === null ? 0 : Math.min((timestamp - lastFrame) / 1000, 0.05);
       lastFrame = timestamp;
       const settings = runtimeRef.current;
@@ -455,7 +463,9 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
       gl.uniform1f(uniforms.autoCenterRepulsion, settings.autoCenterRepulsion);
       gl.uniform1i(uniforms.transparent, settings.transparent ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      schedule();
+      const mouseMoving =
+        Math.max(Math.abs(mouse.targetX - mouse.smoothX), Math.abs(mouse.targetY - mouse.smoothY), Math.abs(mouse.targetActive - mouse.smoothActive)) > 0.001;
+      if (!settings.disableAnimation || mouseMoving) schedule();
     };
 
     const unbindPointer = bindWindowPointer(
@@ -465,9 +475,11 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
         const mouse = mouseRef.current;
         mouse.targetX = pointer.x;
         mouse.targetY = pointer.y;
+        schedule();
       },
       (active) => {
         mouseRef.current.targetActive = runtimeRef.current.mouseInteraction && active ? 1 : 0;
+        schedule();
       }
     );
     const handleVisibility = () => {
@@ -492,6 +504,7 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
       schedule();
     };
 
+    invalidateRef.current = schedule;
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
     document.addEventListener("visibilitychange", handleVisibility);
@@ -501,6 +514,7 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
     schedule();
     return () => {
       disposed = true;
+      invalidateRef.current = null;
       if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       unbindPointer();
@@ -511,6 +525,10 @@ export function Galaxy({ className = "dynamic-background", speed = 1, parameters
       renderer = null;
     };
   }, []);
+
+  useEffect(() => {
+    invalidateRef.current?.();
+  }, [speed, parameters]);
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />;
 }

@@ -1,3 +1,4 @@
+import { createFrameGate } from "./frameBudget";
 import { useEffect, useRef, type ReactElement } from "react";
 
 // Adapted from React Bits PixelSnow by David Haz.
@@ -365,6 +366,7 @@ export function Snow({ className = "dynamic-background", from = "#ffffff", speed
     let elapsed = 0;
     let lastFrame: number | null = null;
     let disposed = false;
+    const canDraw = createFrameGate();
 
     const resize = () => {
       if (disposed || !renderer) return;
@@ -392,6 +394,10 @@ export function Snow({ className = "dynamic-background", from = "#ffffff", speed
     const draw = (timestamp: number) => {
       animationFrame = null;
       if (disposed || !renderer || document.visibilityState === "hidden") return;
+      if (!canDraw(timestamp)) {
+        schedule();
+        return;
+      }
       const delta = lastFrame === null ? 0 : Math.min((timestamp - lastFrame) / 1000, 0.05);
       lastFrame = timestamp;
       elapsed += delta;

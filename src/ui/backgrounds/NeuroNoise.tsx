@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type ReactElement } from "react";
 import { ShaderFitOptions, ShaderMount, getShaderColorFromString, neuroNoiseFragmentShader, type ShaderMountUniforms } from "@paper-design/shaders";
+import { createFrameGate } from "./frameBudget";
 import { NEURO_NOISE_DEFAULT_COLORS } from "../../shared/dynamicEffects";
 import { boundedCanvasSize } from "./canvasSizing";
 
@@ -58,6 +59,7 @@ function buildNeuroUniforms(settings: NeuroRuntimeSettings): ShaderMountUniforms
 export function NeuroNoise({ className = "dynamic-background", speed = 10, parameters }: NeuroNoiseProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const shaderRef = useRef<ShaderMount | null>(null);
+  const resumeRef = useRef<(() => void) | null>(null);
   const globalSpeed = clamp(speed, 0, 4);
   const colorFront = parameters?.colorFront ?? NEURO_NOISE_DEFAULT_COLORS.front;
   const colorMid = parameters?.colorMid ?? NEURO_NOISE_DEFAULT_COLORS.mid;
@@ -79,7 +81,7 @@ export function NeuroNoise({ className = "dynamic-background", speed = 10, param
         neuroNoiseFragmentShader,
         buildNeuroUniforms(settings),
         { alpha: false, antialias: false, depth: false, premultipliedAlpha: false },
-        settings.globalSpeed,
+        0,
         0,
         1,
         3_000_000
@@ -95,7 +97,37 @@ export function NeuroNoise({ className = "dynamic-background", speed = 10, param
       shader.canvasElement.height = canvasSize.height;
       shader.setFrame(0);
 
+      let raf: number | undefined;
+      let previous: number | undefined;
+      const canDraw = createFrameGate();
+      const schedule = () => {
+        if (raf === undefined && !document.hidden && currentSettingsRef.current.globalSpeed !== 0) raf = requestAnimationFrame(draw);
+      };
+      const draw = (timestamp: number) => {
+        raf = undefined;
+        if (document.hidden) return;
+        if (canDraw(timestamp)) {
+          const elapsed = previous === undefined ? 0 : Math.min(50, timestamp - previous);
+          previous = timestamp;
+          shader.setFrame(shader.getCurrentFrame() + elapsed * currentSettingsRef.current.globalSpeed);
+        }
+        schedule();
+      };
+      const visibility = () => {
+        previous = undefined;
+        if (document.hidden && raf !== undefined) {
+          cancelAnimationFrame(raf);
+          raf = undefined;
+        } else schedule();
+      };
+      resumeRef.current = schedule;
+      document.addEventListener("visibilitychange", visibility);
+      schedule();
+
       return () => {
+        if (raf !== undefined) cancelAnimationFrame(raf);
+        document.removeEventListener("visibilitychange", visibility);
+        resumeRef.current = null;
         shaderRef.current = null;
         shader.dispose();
       };
@@ -108,7 +140,7 @@ export function NeuroNoise({ className = "dynamic-background", speed = 10, param
     const shader = shaderRef.current;
     if (!shader) return;
     shader.setUniforms(buildNeuroUniforms(currentSettingsRef.current));
-    shader.setSpeed(globalSpeed);
+    resumeRef.current?.();
   }, [brightness, colorBack, colorFront, colorMid, globalSpeed, rotation, scale]);
 
   return <div ref={hostRef} className={className} aria-hidden="true" />;

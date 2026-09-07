@@ -1,3 +1,4 @@
+import { createFrameGate } from "./frameBudget";
 import { useEffect, useRef, type ReactElement } from "react";
 import { boundedCanvasSize } from "./canvasSizing";
 
@@ -210,6 +211,7 @@ function destroyRenderer(renderer: Renderer | null): void {
 
 export function SilkFlow({ className = "dynamic-background", from = "#48b676", speed = 9, parameters }: SilkFlowProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const invalidateRef = useRef<(() => void) | null>(null);
   const resolved = resolveSilkFlowSettings(speed, parameters);
   const runtimeRef = useRef<SilkFlowRuntime>({ ...resolved, color: silkFlowColor(from) });
   runtimeRef.current = { ...resolved, color: silkFlowColor(from) };
@@ -222,6 +224,7 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
     let elapsed = 0;
     let lastFrame: number | null = null;
     let disposed = false;
+    const canDraw = createFrameGate();
 
     const resize = () => {
       if (disposed || !renderer) return;
@@ -234,6 +237,7 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
         canvas.height = bounded.height;
       }
       renderer.gl.viewport(0, 0, bounded.width, bounded.height);
+      invalidateRef.current?.();
     };
 
     const schedule = () => {
@@ -245,6 +249,10 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
     const draw = (timestamp: number) => {
       animationFrame = null;
       if (disposed || !renderer || document.visibilityState === "hidden") return;
+      if (!canDraw(timestamp)) {
+        schedule();
+        return;
+      }
       const delta = lastFrame === null ? 0 : Math.min((timestamp - lastFrame) / 1000, 0.05);
       lastFrame = timestamp;
       elapsed += delta * 0.1;
@@ -262,7 +270,7 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
       gl.uniform1f(uniforms.rotation, settings.rotation);
       gl.uniform1f(uniforms.noiseIntensity, settings.noiseIntensity);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      schedule();
+      if (settings.speed !== 0) schedule();
     };
 
     const handleVisibility = () => {
@@ -287,6 +295,7 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
       schedule();
     };
 
+    invalidateRef.current = schedule;
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas);
     document.addEventListener("visibilitychange", handleVisibility);
@@ -296,6 +305,7 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
     schedule();
     return () => {
       disposed = true;
+      invalidateRef.current = null;
       if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -305,6 +315,10 @@ export function SilkFlow({ className = "dynamic-background", from = "#48b676", s
       renderer = null;
     };
   }, []);
+
+  useEffect(() => {
+    invalidateRef.current?.();
+  }, [from, speed, parameters]);
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />;
 }

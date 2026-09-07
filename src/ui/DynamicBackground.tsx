@@ -1,3 +1,4 @@
+import { createFrameGate } from "./backgrounds/frameBudget";
 import { Suspense, lazy, useEffect, useRef } from "react";
 import type { DynamicBackground as DynamicBackgroundSettings } from "../shared/model";
 import type { DynamicEffect } from "../shared/dynamicEffects";
@@ -533,6 +534,7 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
     let elapsed = 0;
     let lastFrame: number | null = null;
     let disposed = false;
+    const canDraw = createFrameGate();
 
     const resize = () => {
       if (disposed || !renderer) return;
@@ -552,8 +554,8 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
           ? (maxViewport as ArrayLike<number>)[1]
           : window.innerHeight;
       const viewportRatio = Math.min(maxViewportWidth / cssWidth, maxViewportHeight / cssHeight);
-      const qualityRatio = Math.max(0.5, Math.min(2, nativeRatio, pixelBudgetRatio));
-      const pixelRatio = Math.max(0.1, Math.min(qualityRatio, viewportRatio));
+      const qualityRatio = Math.min(2, nativeRatio, pixelBudgetRatio);
+      const pixelRatio = Math.min(qualityRatio, viewportRatio);
       const width = Math.round(cssWidth * pixelRatio);
       const height = Math.round(cssHeight * pixelRatio);
       if (canvas.width !== width || canvas.height !== height) {
@@ -572,6 +574,10 @@ function WebGlDynamicBackground({ background }: { background: ColorDynamicBackgr
     const draw = (timestamp: number) => {
       animationFrame = null;
       if (disposed || !renderer || document.visibilityState === "hidden") return;
+      if (!canDraw(timestamp)) {
+        schedule();
+        return;
+      }
       const delta = lastFrame === null ? 0 : Math.min((timestamp - lastFrame) / 1000, 0.05);
       lastFrame = timestamp;
       elapsed += delta * dynamicTimeScale(frameConfigRef.current.speed);

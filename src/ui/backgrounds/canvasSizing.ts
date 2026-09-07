@@ -5,7 +5,7 @@ export function boundedCanvasSize(cssWidth: number, cssHeight: number): { width:
   const safeHeight = Math.max(1, cssHeight);
   const nativeDpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
   const budgetDpr = Math.sqrt(MAX_CANVAS_PIXELS / (safeWidth * safeHeight));
-  const dpr = Math.max(0.5, Math.min(nativeDpr, budgetDpr));
+  const dpr = Math.min(nativeDpr, budgetDpr);
   return {
     width: Math.max(1, Math.floor(safeWidth * dpr)),
     height: Math.max(1, Math.floor(safeHeight * dpr)),

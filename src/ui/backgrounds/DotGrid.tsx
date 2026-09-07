@@ -1,5 +1,7 @@
 import { type ReactElement, useCallback, useEffect, useMemo, useRef } from "react";
 import { boundedCanvasSize } from "./canvasSizing";
+import { createFrameGate } from "./frameBudget";
+import { boundedDotGrid } from "./resourceBudget";
 
 export type DotGridParameters = {
   dotSize?: number;
@@ -267,11 +269,9 @@ export function DotGrid({ className = "dynamic-background", from = "#102030", to
     }
     sizeRef.current = { width, height, dpr };
 
-    const cols = Math.floor((width + gap) / (dotSize + gap));
-    const rows = Math.floor((height + gap) / (dotSize + gap));
-    const cell = dotSize + gap;
-    const gridWidth = cell * cols - gap;
-    const gridHeight = cell * rows - gap;
+    const { cols, rows, cell, gap: effectiveGap } = boundedDotGrid(width, height, dotSize, gap);
+    const gridWidth = cell * cols - effectiveGap;
+    const gridHeight = cell * rows - effectiveGap;
     const startX = (width - gridWidth) / 2 + dotSize / 2;
     const startY = (height - gridHeight) / 2 + dotSize / 2;
 
@@ -323,6 +323,7 @@ export function DotGrid({ className = "dynamic-background", from = "#102030", to
     let disposed = false;
     let frameQueued = false;
     let lastFrameTime = 0;
+    const canDraw = createFrameGate();
     isDocumentHidden.current = typeof document !== "undefined" ? document.hidden : false;
     const schedule = () => {
       if (disposed || isDocumentHidden.current || frameQueued) return;
@@ -344,6 +345,10 @@ export function DotGrid({ className = "dynamic-background", from = "#102030", to
 
     const draw = (frameTime: number) => {
       if (disposed) return;
+      if (!canDraw(frameTime)) {
+        schedule();
+        return;
+      }
 
       if (isDocumentHidden.current) {
         return;

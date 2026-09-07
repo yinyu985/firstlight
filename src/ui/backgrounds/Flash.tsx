@@ -1,5 +1,7 @@
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { boundedCanvasSize } from "./canvasSizing";
+import { createFrameGate } from "./frameBudget";
+import { boundedTextureSize, MAX_FLUID_SIM_PIXELS, MAX_FLUID_TEXTURE_PIXELS } from "./resourceBudget";
 
 type DynamicEffectParameterValue = string | number | boolean;
 type DynamicEffectParameters = Record<string, DynamicEffectParameterValue>;
@@ -793,16 +795,26 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
 
     function createFBO(w: number, h: number, internalFormat: number, format: number, type: number, param: number): FBO {
       gl.activeTexture(gl.TEXTURE0);
-      const texture = gl.createTexture()!;
+      const texture = gl.createTexture();
+      if (!texture) throw new Error("Fluid texture allocation failed.");
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, param);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, param);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
-      const fbo = gl.createFramebuffer()!;
+      const fbo = gl.createFramebuffer();
+      if (!fbo) {
+        gl.deleteTexture(texture);
+        throw new Error("Fluid framebuffer allocation failed.");
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteTexture(texture);
+        gl.deleteFramebuffer(fbo);
+        throw new Error("Fluid framebuffer is incomplete.");
+      }
       gl.viewport(0, 0, w, h);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -874,37 +886,44 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function initFramebuffers() {
-      const simRes = getResolution(config.SIM_RESOLUTION!);
-      const dyeRes = getResolution(config.DYE_RESOLUTION!);
+      try {
+        const simRes = getResolution(config.SIM_RESOLUTION!, MAX_FLUID_SIM_PIXELS);
+        const dyeRes = getResolution(config.DYE_RESOLUTION!);
 
-      const texType = ext.halfFloatTexType;
-      const rgba = ext.formatRGBA;
-      const rg = ext.formatRG;
-      const r = ext.formatR;
-      const filtering = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
-      gl.disable(gl.BLEND);
+        const texType = ext.halfFloatTexType;
+        const rgba = ext.formatRGBA;
+        const rg = ext.formatRG;
+        const r = ext.formatR;
+        const filtering = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
+        gl.disable(gl.BLEND);
 
-      if (!dye) {
-        dye = createDoubleFBO(dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
-      } else {
-        dye = resizeDoubleFBO(dye, dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
+        if (!dye) {
+          dye = createDoubleFBO(dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
+        } else {
+          dye = resizeDoubleFBO(dye, dyeRes.width, dyeRes.height, rgba.internalFormat, rgba.format, texType, filtering);
+        }
+
+        if (!velocity) {
+          velocity = createDoubleFBO(simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
+        } else {
+          velocity = resizeDoubleFBO(velocity, simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
+        }
+
+        if (framebuffersReady) {
+          deleteFBO(divergence);
+          deleteFBO(curl);
+          deleteDoubleFBO(pressure);
+        }
+        divergence = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+        curl = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+        pressure = createDoubleFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
+        framebuffersReady = true;
+        return true;
+      } catch {
+        // Release partially allocated GPU resources and leave the static fallback visible.
+        gl.getExtension("WEBGL_lose_context")?.loseContext();
+        return false;
       }
-
-      if (!velocity) {
-        velocity = createDoubleFBO(simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
-      } else {
-        velocity = resizeDoubleFBO(velocity, simRes.width, simRes.height, rg.internalFormat, rg.format, texType, filtering);
-      }
-
-      if (framebuffersReady) {
-        deleteFBO(divergence);
-        deleteFBO(curl);
-        deleteDoubleFBO(pressure);
-      }
-      divergence = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
-      curl = createFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
-      pressure = createDoubleFBO(simRes.width, simRes.height, r.internalFormat, r.format, texType, gl.NEAREST);
-      framebuffersReady = true;
     }
 
     function updateKeywords() {
@@ -913,22 +932,24 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       displayMaterial.setKeywords(displayKeywords);
     }
 
-    function getResolution(resolution: number) {
+    function getResolution(resolution: number, pixelBudget = MAX_FLUID_TEXTURE_PIXELS) {
       const w = gl.drawingBufferWidth;
       const h = gl.drawingBufferHeight;
       const aspectRatio = w / h;
       const aspect = aspectRatio < 1 ? 1 / aspectRatio : aspectRatio;
       const min = Math.round(resolution);
       const max = Math.round(resolution * aspect);
+      const reportedLimit: unknown = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      const limit = typeof reportedLimit === "number" && reportedLimit > 0 ? reportedLimit : 4096;
       if (w > h) {
-        return { width: max, height: min };
+        return boundedTextureSize(max, min, limit, pixelBudget);
       }
-      return { width: min, height: max };
+      return boundedTextureSize(min, max, limit, pixelBudget);
     }
 
     resizeCanvas();
     updateKeywords();
-    initFramebuffers();
+    if (!initFramebuffers()) return;
 
     let lastUpdateTime = Date.now();
     let colorUpdateTimer = 0.0;
@@ -939,10 +960,16 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     let lastHumanInputTime = lastHumanInputTimeRef.current;
     let automaticPointerActive = false;
     let automaticPointer = automaticPointerRef.current;
+    let idleSimulationSeconds = 0;
+    const canDraw = createFrameGate();
 
-    function updateFrame() {
+    function updateFrame(timestamp: number) {
       animationFrameId = null;
       if (disposed || document.visibilityState === "hidden") return;
+      if (!canDraw(timestamp)) {
+        animationFrameId = window.requestAnimationFrame(updateFrame);
+        return;
+      }
       const current = settingsRef.current;
       config.DENSITY_DISSIPATION = current.densityDissipation;
       config.VELOCITY_DISSIPATION = current.velocityDissipation;
@@ -952,12 +979,18 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
       config.SPLAT_FORCE = current.splatForce;
       config.COLOR_UPDATE_SPEED = current.colorUpdateSpeed;
       const dt = calcDeltaTime();
-      if (resizeCanvas()) initFramebuffers();
+      if (resizeCanvas() && !initFramebuffers()) return;
+      idleSimulationSeconds += dt;
       updateAutomaticPointer(dt);
       updateColors(dt);
       applyInputs();
       step(dt);
       render(null);
+      // Conservative dissipation horizon; count simulated time, never time spent hidden.
+      if (!current.autoMotion && idleSimulationSeconds > 12 / Math.min(current.densityDissipation, current.velocityDissipation)) {
+        simulationStarted = false;
+        return;
+      }
       animationFrameId = window.requestAnimationFrame(updateFrame);
     }
 
@@ -1209,6 +1242,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function splat(x: number, y: number, dx: number, dy: number, color: ColorRGB) {
+      idleSimulationSeconds = 0;
       splatProgram.bind();
       if (splatProgram.uniforms.uTarget) {
         gl.uniform1i(splatProgram.uniforms.uTarget, velocity.read.attach(0));
@@ -1421,7 +1455,7 @@ export function Flash({ className = "dynamic-background", ...props }: FlashProps
     }
 
     function handleResize() {
-      if (resizeCanvas()) initFramebuffers();
+      if (resizeCanvas() && !initFramebuffers()) stopLoop();
     }
 
     window.addEventListener("mousedown", handleMouseDown);

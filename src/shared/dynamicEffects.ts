@@ -127,7 +127,7 @@ const effectSpec = (
 const SILK_PARAMETERS = [
   withHint(range("scale", "纹理大小", 0.1, 5, 0.1, 2), "数值越大，丝绸褶皱越密、范围越小"),
   withHint(range("noiseIntensity", "颗粒强度", 0, 5, 0.1, 3), "控制丝绸表面的细小明暗颗粒"),
-  withHint(range("rotation", "纹理旋转角度", 0, 6.28, 0.1, 0), "以弧度旋转整片丝绸褶皱的方向")
+  withHint(range("rotation", "纹理旋转角度", 0, 6.28, 0.01, 0), "以弧度旋转整片丝绸褶皱的方向")
 ] as const;
 
 export const SILK_DEFAULT_COLORS = {
@@ -155,7 +155,7 @@ const CELLS_SPEC: DynamicEffectDefinition = {
 
 const FLASH_PARAMETERS = [
   withHint(range("simResolution", "流动计算精细度", 32, 256, 32, 128, true), "数值越大，流体转弯和相互推动时越细腻，也会占用更多性能"),
-  withHint(range("dyeResolution", "颜色边缘精细度", 512, 2048, 128, 1440, true), "控制彩色流体边缘的清晰程度，数值越大越锐利"),
+  withHint(range("dyeResolution", "颜色边缘精细度", 512, 2048, 32, 1440, true), "控制彩色流体边缘的清晰程度，数值越大越锐利"),
   withHint(range("densityDissipation", "颜色消散速度", 0.5, 10, 0.5, 3.5), "数值越大，鼠标留下的彩色轨迹消失得越快"),
   withHint(range("velocityDissipation", "流动惯性消散", 0.5, 5, 0.5, 2.5), "数值越大，流体被推动后越快停下来"),
   withHint(range("pressure", "流体回弹力度", 0, 1, 0.1, 0.1), "控制流体挤压后恢复平衡时保留多少推动力"),
@@ -214,7 +214,7 @@ export const GALAXY_DEFAULT_COLORS = {
 } as const;
 
 const SNOW_PARAMETERS = [
-  withHint(range("flakeSize", "近处雪花大小", 0.001, 0.05, 0.002, 0.019), "控制靠近镜头时雪花本体的尺寸"),
+  withHint(range("flakeSize", "近处雪花大小", 0.001, 0.05, 0.001, 0.019), "控制靠近镜头时雪花本体的尺寸"),
   withHint(range("minFlakeSize", "最小显示尺寸", 0.5, 3, 0.25, 2.75), "保证远处雪花在屏幕上不会小于这个像素尺寸"),
   withHint(range("pixelResolution", "像素画精细度", 50, 2000, 25, 500, true), "数值越大像素块越细，数值越小复古颗粒越明显"),
   withHint(range("depthFade", "远处可见度", 1, 20, 1, 10, true), "数值越大，远处雪花保持明亮的距离越长"),
@@ -286,7 +286,7 @@ const GALAXY_SPEC = effectSpec(
 const SNOW_SPEC = effectSpec(
   "snow",
   "SNOW",
-  { min: 0.1, max: 5, step: 0.25, defaultValue: 1.35, label: "飘落速度", hint: "控制雪花穿过画面的整体速度" },
+  { min: 0.1, max: 5, step: 0.05, defaultValue: 1.35, label: "飘落速度", hint: "控制雪花穿过画面的整体速度" },
   SNOW_PARAMETERS
 );
 const NEURO_NOISE_SPEC = effectSpec(
@@ -354,7 +354,8 @@ export function normalizeDynamicParameters(effect: DynamicEffect, raw: unknown):
     const value = rawParameters?.[parameter.key];
     switch (parameter.kind) {
       case "range": {
-        const candidate = typeof value === "number" && Number.isFinite(value) ? value : parameter.defaultValue;
+        const candidate =
+          typeof value === "number" && Number.isFinite(value) && value >= parameter.min && value <= parameter.max ? value : parameter.defaultValue;
         const normalized = parameter.integer ? Math.round(candidate) : candidate;
         parameters[parameter.key] = Math.max(parameter.min, Math.min(parameter.max, normalized));
         break;
@@ -392,7 +393,7 @@ export function getDynamicEffectSpeed(effect: DynamicEffect): DynamicSpeedSpec {
 
 export function normalizeDynamicSpeed(effect: DynamicEffect, speed: unknown): number {
   const spec = getDynamicEffectSpeed(effect);
-  const base = typeof speed === "number" && Number.isFinite(speed) ? speed : spec.defaultValue;
+  const base = typeof speed === "number" && Number.isFinite(speed) && speed >= spec.min && speed <= spec.max ? speed : spec.defaultValue;
   if (spec.integer) {
     return Math.max(spec.min, Math.min(spec.max, Math.round(base)));
   }

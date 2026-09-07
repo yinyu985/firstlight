@@ -118,7 +118,7 @@ describe("Galaxy pointer interaction", () => {
     act(() => runFrame(0));
     act(() => {
       window.dispatchEvent(new MouseEvent("pointermove", { clientX: 800, clientY: 100 }));
-      runFrame(16);
+      runFrame(1000 / 60);
     });
 
     const mouseCall = lastUniformCall(uniform2f.mock.calls, "uMouse");
