@@ -1,6 +1,6 @@
 import { GIST_DESCRIPTION, MAX_SNAPSHOT_BYTES, SNAPSHOT_FILE_NAME, type Snapshot } from "./model";
-import { snapshotHash, validateSnapshot, type SettingsRepair } from "./snapshot";
-import { decodeGistSnapshot, encodeGistSnapshot, NotesDecryptionError } from "./notesEnvelope";
+import { parseSnapshotWithDiagnostics, snapshotHash, validateSnapshot, type SettingsRepair } from "./snapshot";
+import { decodeGistSnapshot, encodeGistSnapshot, NotesDecryptionError, UnsupportedNotesFormatError } from "./notesEnvelope";
 
 interface GistFile {
   filename?: string;
@@ -234,7 +234,13 @@ export class GistClient {
     return this.decodeRemote(gist, this.token);
   }
 
-  private async decodeRemote(gist: GistResponse, decryptionToken: string): Promise<RemoteSnapshot> {
+  /** Only a user-requested upload may use this path to replace a validated plaintext snapshot. */
+  async readForEncryptionUpgrade(gistId: string): Promise<RemoteSnapshot> {
+    const gist = await this.getSecretGist(gistId);
+    return this.decodeRemote(gist, this.token, true);
+  }
+
+  private async decodeRemote(gist: GistResponse, decryptionToken: string, allowPlaintextNotes = false): Promise<RemoteSnapshot> {
     const file = gist.files[SNAPSHOT_FILE_NAME];
     if (!file) throw new GitHubError(`${SNAPSHOT_FILE_NAME} is missing from the Gist`);
     let content = file.content;
@@ -242,11 +248,18 @@ export class GistClient {
       if (!file.raw_url) throw new GitHubError("GitHub did not return a complete snapshot URL");
       content = await this.readRawFile(file.raw_url);
     }
+    let decoded: ReturnType<typeof parseSnapshotWithDiagnostics>;
+    try {
+      decoded = await decodeGistSnapshot(content, decryptionToken, this.signal);
+    } catch (error) {
+      if (!allowPlaintextNotes || !(error instanceof UnsupportedNotesFormatError)) throw error;
+      decoded = parseSnapshotWithDiagnostics(content);
+    }
     const remote: RemoteSnapshot = {
       gistId: gist.id,
       htmlUrl: gist.html_url,
       updatedAt: gist.updated_at,
-      ...(await decodeGistSnapshot(content, decryptionToken, this.signal))
+      ...decoded
     };
     this.verifiedReads.set(remote, gist.id);
     return remote;

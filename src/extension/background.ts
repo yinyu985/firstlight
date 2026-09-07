@@ -20,7 +20,7 @@ import { inspectSettings, settingsRepairMessage, sha256, snapshotHash, validateN
 import { canAutoUpload, decideSyncWithRevision } from "../shared/sync-decision";
 import { StateRepository, StorageCommitError } from "./stateRepository";
 import { statePatch } from "../shared/statePatch";
-import { NotesDecryptionError } from "../shared/notesEnvelope";
+import { NotesDecryptionError, UnsupportedNotesFormatError } from "../shared/notesEnvelope";
 
 const repository = new StateRepository(chrome.storage.local, chrome.storage.session);
 const UPLOAD_ALARM = "firstlight-pending-upload";
@@ -572,7 +572,12 @@ async function upload(force = false, reviewed?: DiffPayload): Promise<void> {
     const client = await connectedClient();
     await setStatus({ phase: "uploading", message: memory.gistId ? "Uploading…" : "Creating remote snapshot…", gistId: memory.gistId });
     let remote: RemoteSnapshot | undefined;
-    remote = await resolveGist(client, true);
+    try {
+      remote = await resolveGist(client, true);
+    } catch (error) {
+      if (!force || !(error instanceof UnsupportedNotesFormatError) || !memory.gistId) throw error;
+      remote = await client.readForEncryptionUpgrade(memory.gistId);
+    }
     if (!remote) return;
     const deferred = await queueLocal(async () => {
       bookmarks = await readBookmarks();

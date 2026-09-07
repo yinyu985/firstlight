@@ -205,7 +205,7 @@ describe("normalizeGitHubToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("uploads compact JSON with encrypted Notes and unchanged public fields", async () => {
+  it("uploads indented JSON with encrypted Notes and unchanged public fields", async () => {
     const snapshot = snapshotFrom([{ title: "Example", url: "https://example.com" }], DEFAULT_SETTINGS);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
       if (!init?.body) return jsonResponse(gistResponse({ snapshot }));
@@ -215,7 +215,7 @@ describe("normalizeGitHubToken", () => {
       expect(encoded.bookmarks).toEqual(snapshot.bookmarks);
       expect(encoded.config).toEqual(snapshot.config);
       expect(encoded.notes.format).toBe("firstlight.notes.encrypted");
-      expect(content).toBe(JSON.stringify(encoded));
+      expect(content).toBe(JSON.stringify(encoded, null, 2));
       expect((await decodeGistSnapshot(content, "github_pat_test")).snapshot).toEqual(snapshot);
       return new Response(
         JSON.stringify({
@@ -231,5 +231,27 @@ describe("normalizeGitHubToken", () => {
 
     await expect(new GistClient("github_pat_test").create(snapshot)).resolves.toMatchObject({ gistId: "gist-id" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a separately named manual path to upgrade validated plaintext Notes", async () => {
+    const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
+    let content = JSON.stringify(snapshot);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "PATCH") content = JSON.parse(String(init.body)).files["firstlight.json"].content;
+      return jsonResponse(
+        gistResponse({
+          snapshot,
+          files: { "firstlight.json": { content, truncated: false } }
+        })
+      );
+    });
+    const client = new GistClient("github_pat_test");
+
+    await expect(client.read("gist-id")).rejects.toThrow(/Unsupported Notes format/);
+    const legacy = await client.readForEncryptionUpgrade("gist-id");
+    await expect(client.update("gist-id", snapshot, legacy)).resolves.toMatchObject({ snapshot });
+
+    expect(JSON.parse(content).notes.format).toBe("firstlight.notes.encrypted");
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "GET", "PATCH", "GET"]);
   });
 });

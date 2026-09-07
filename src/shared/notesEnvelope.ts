@@ -14,6 +14,13 @@ export class NotesDecryptionError extends SnapshotValidationError {
   }
 }
 
+export class UnsupportedNotesFormatError extends SnapshotValidationError {
+  constructor() {
+    super("Unsupported Notes format. Update all clients to the current Notes encryption format.");
+    this.name = "UnsupportedNotesFormatError";
+  }
+}
+
 function base64(bytes: Uint8Array): string {
   const parts: string[] = [];
   for (let i = 0; i < bytes.length; i += 8192) parts.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
@@ -93,7 +100,8 @@ export async function encodeGistSnapshot(snapshot: Snapshot, token: string, sign
     compressed
   );
   signal?.throwIfAborted();
-  const text = JSON.stringify({ ...canonical, notes: { ...header, data: base64(new Uint8Array(encrypted)) } });
+  // Keep public fields readable in Gist; only the compressed payload and AAD use compact JSON.
+  const text = JSON.stringify({ ...canonical, notes: { ...header, data: base64(new Uint8Array(encrypted)) } }, null, 2);
   if (encoder.encode(text).byteLength > MAX_SNAPSHOT_BYTES) throw new SnapshotValidationError("Encoded firstlight.json exceeds the 10 MiB transfer limit");
   return text;
 }
@@ -109,7 +117,8 @@ export async function decodeGistSnapshot(text: string, token: string, signal?: A
   }
   if (!input || typeof input !== "object" || Array.isArray(input)) return parseSnapshotWithDiagnostics(text);
   const raw = input as Record<string, unknown>;
-  if (!raw.notes || typeof raw.notes !== "object" || Array.isArray(raw.notes))
+  if (Array.isArray(raw.notes)) throw new UnsupportedNotesFormatError();
+  if (!raw.notes || typeof raw.notes !== "object")
     throw new SnapshotValidationError("Unsupported Notes format. Update all clients to the current Notes encryption format.");
   const envelope = raw.notes as Record<string, unknown>;
   if (

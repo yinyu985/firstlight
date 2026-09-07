@@ -7,6 +7,7 @@ import { GitHubError, type RemoteSnapshot } from "../shared/gist";
 const gistMock = vi.hoisted(() => ({
   discover: vi.fn(),
   read: vi.fn(),
+  readForEncryptionUpgrade: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   rekey: vi.fn()
@@ -17,6 +18,7 @@ vi.mock("../shared/gist", async () => {
   class MockGistClient {
     discover = gistMock.discover;
     read = gistMock.read;
+    readForEncryptionUpgrade = gistMock.readForEncryptionUpgrade;
     create = gistMock.create;
     update = gistMock.update;
     rekey = gistMock.rekey;
@@ -218,6 +220,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-20T09:00:00.000Z"));
   gistMock.discover.mockReset().mockResolvedValue([]);
   gistMock.read.mockReset();
+  gistMock.readForEncryptionUpgrade.mockReset();
   gistMock.create.mockReset();
   gistMock.rekey.mockReset();
   gistMock.update.mockReset().mockImplementation(async (gistId: string, snapshot: Snapshot) => ({
@@ -324,6 +327,20 @@ describe("extension background integration", () => {
     expect(mock.getStored().baseline).toEqual(state.baseline);
     expect(mock.getStored().notes).toEqual(state.notes);
     expect(gistMock.update).not.toHaveBeenCalled();
+  });
+  it("upgrades legacy plaintext Notes only after an explicit upload", async () => {
+    const local = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
+    const mock = chromeMock(await connectedState(local));
+    vi.stubGlobal("chrome", mock.api);
+    gistMock.read.mockRejectedValue(new (await import("../shared/notesEnvelope")).UnsupportedNotesFormatError());
+    gistMock.readForEncryptionUpgrade.mockResolvedValue(remote(local));
+    await import("./background");
+
+    const response = await sendRequest(mock.messageListeners[0], { type: "UPLOAD_NOW" });
+
+    expect(response.ok).toBe(true);
+    expect(gistMock.readForEncryptionUpgrade).toHaveBeenCalledWith("gist-1");
+    expect(gistMock.update).toHaveBeenCalledWith("gist-1", expect.objectContaining({ notes: [] }), expect.objectContaining({ gistId: "gist-1" }));
   });
   it("retries an automatic upload's failed baseline commit without advancing its baseline", async () => {
     const baseline = snapshotFrom([], DEFAULT_SETTINGS, [], LOCAL_TIME);
