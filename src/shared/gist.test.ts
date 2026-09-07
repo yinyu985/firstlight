@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, GIST_DESCRIPTION, snapshotFrom, type Snapshot } from "./model";
 import { GistClient, normalizeGitHubToken } from "./gist";
+import { decodeGistSnapshot, encodeGistSnapshot } from "./notesEnvelope";
+
+const emptyNotes = JSON.parse(await encodeGistSnapshot(snapshotFrom([], DEFAULT_SETTINGS), "github_pat_test")).notes;
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -29,11 +32,23 @@ function gistResponse({
     html_url: `https://gist.github.com/${id}`,
     updated_at: "2026-08-12T04:00:00Z",
     public: isPublic,
-    files: files ?? { "firstlight.json": { content: JSON.stringify(snapshot, null, 2), truncated: false } }
+    files: files ?? { "firstlight.json": { content: JSON.stringify({ ...snapshot, notes: emptyNotes }), truncated: false } }
   };
 }
 
 describe("normalizeGitHubToken", () => {
+  it("reuses this operation's secret read while still independently verifying the write", async () => {
+    const snapshot = snapshotFrom([], DEFAULT_SETTINGS);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse(gistResponse({ snapshot })));
+    const client = new GistClient("github_pat_test");
+    const remote = await client.read("gist-id");
+    await client.update("gist-id", snapshot, remote);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "PATCH", "GET"]);
+    fetchMock.mockClear();
+    // A previous operation's proof cannot be used a second time.
+    await client.update("gist-id", snapshot, remote);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "PATCH", "GET"]);
+  });
   it("removes copied whitespace and surrounding quotes", () => {
     expect(normalizeGitHubToken("  “github_pat_abc123”\n")).toBe("github_pat_abc123");
   });
@@ -67,11 +82,11 @@ describe("normalizeGitHubToken", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })))
       .mockRejectedValueOnce(new DOMException("The request was interrupted", "AbortError"))
+      .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })))
       .mockResolvedValueOnce(jsonResponse(gistResponse({ snapshot })));
 
     await expect(new GistClient("github_pat_test").update("gist-id", snapshot)).resolves.toMatchObject({ gistId: "gist-id" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls.slice(1).every(([, init]) => init?.method === "PATCH")).toBe(true);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "PATCH", "PATCH", "GET"]);
   });
 
   it("reconciles an interrupted POST instead of creating a duplicate Gist", async () => {
@@ -190,12 +205,18 @@ describe("normalizeGitHubToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("measures and uploads the exact same pretty snapshot text", async () => {
+  it("uploads compact JSON with encrypted Notes and unchanged public fields", async () => {
     const snapshot = snapshotFrom([{ title: "Example", url: "https://example.com" }], DEFAULT_SETTINGS);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (!init?.body) return jsonResponse(gistResponse({ snapshot }));
       const body = JSON.parse(String(init?.body)) as { files: Record<string, { content: string }> };
       const content = body.files["firstlight.json"].content;
-      expect(content).toBe(JSON.stringify(snapshot, null, 2));
+      const encoded = JSON.parse(content);
+      expect(encoded.bookmarks).toEqual(snapshot.bookmarks);
+      expect(encoded.config).toEqual(snapshot.config);
+      expect(encoded.notes.format).toBe("firstlight.notes.encrypted");
+      expect(content).toBe(JSON.stringify(encoded));
+      expect((await decodeGistSnapshot(content, "github_pat_test")).snapshot).toEqual(snapshot);
       return new Response(
         JSON.stringify({
           id: "gist-id",
@@ -209,6 +230,6 @@ describe("normalizeGitHubToken", () => {
     });
 
     await expect(new GistClient("github_pat_test").create(snapshot)).resolves.toMatchObject({ gistId: "gist-id" });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

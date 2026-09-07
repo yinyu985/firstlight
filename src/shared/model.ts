@@ -1,5 +1,5 @@
 import {
-  isDynamicEffect,
+  DYNAMIC_EFFECT_DEFINITIONS,
   normalizeDynamicEffect,
   normalizeDynamicParameters,
   normalizeDynamicSpeed,
@@ -248,9 +248,10 @@ export function normalizeSettings(input: unknown): SyncedSettings {
           };
 
   const dynamicEffectProfiles: DynamicEffectProfiles = {};
-  for (const [effectInput, rawProfile] of Object.entries(settingsRecord(settings.dynamicEffectProfiles))) {
-    if (!isDynamicEffect(effectInput)) continue;
-    const effect = effectInput;
+  const rawProfiles = settingsRecord(settings.dynamicEffectProfiles);
+  for (const { id: effect } of DYNAMIC_EFFECT_DEFINITIONS) {
+    if (!Object.hasOwn(rawProfiles, effect)) continue;
+    const rawProfile = rawProfiles[effect];
     const profile = settingsRecord(rawProfile);
     if (effect === "neuroNoise") {
       dynamicEffectProfiles.neuroNoise = {
@@ -292,7 +293,9 @@ export function normalizeSettings(input: unknown): SyncedSettings {
   return {
     openTarget: settings.openTarget === "current-tab" || settings.openTarget === "new-tab" ? settings.openTarget : DEFAULT_SETTINGS.openTarget,
     background,
-    dynamicEffectProfiles,
+    dynamicEffectProfiles: Object.fromEntries(
+      DYNAMIC_EFFECT_DEFINITIONS.filter(({ id }) => Object.hasOwn(dynamicEffectProfiles, id)).map(({ id }) => [id, dynamicEffectProfiles[id]])
+    ),
     foreground: {
       color: validColor(foreground.color, DEFAULT_SETTINGS.foreground.color),
       fontSize: validInteger(foreground.fontSize, 12, 24, DEFAULT_SETTINGS.foreground.fontSize)

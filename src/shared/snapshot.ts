@@ -11,6 +11,7 @@ import {
   type Snapshot
 } from "./model";
 import { getDynamicEffectSpeed, isDynamicEffect, normalizeDynamicEffect, normalizeDynamicParameters, normalizeDynamicSpeed } from "./dynamicEffects";
+import { isEastEightTimestamp } from "./timestamp";
 
 const encoder = new TextEncoder();
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -94,7 +95,6 @@ export function validateNotes(value: unknown): SyncNote[] {
   if (!Array.isArray(value)) throw new SnapshotValidationError("Invalid notes list");
   const ids = new Set<string>();
   const supportedKeys = new Set(["id", "name", "content", "createtime", "updatetime"]);
-  const isValidTimestamp = (raw: unknown): raw is string => typeof raw === "string" && raw.endsWith("+08:00") && !Number.isNaN(Date.parse(raw));
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new SnapshotValidationError(`Invalid note item at index ${index}`);
@@ -114,10 +114,10 @@ export function validateNotes(value: unknown): SyncNote[] {
     if (typeof note.content !== "string") {
       throw new SnapshotValidationError(`Note content is invalid at index ${index}`);
     }
-    if (!isValidTimestamp(note.createtime)) {
+    if (!isEastEightTimestamp(note.createtime)) {
       throw new SnapshotValidationError(`Note createtime is invalid at index ${index}`);
     }
-    if (!isValidTimestamp(note.updatetime)) {
+    if (!isEastEightTimestamp(note.updatetime)) {
       throw new SnapshotValidationError(`Note updatetime is invalid at index ${index}`);
     }
     return {
@@ -143,7 +143,7 @@ export function validateSnapshot(input: unknown): Snapshot {
   }
   if (rawValue.settingsVersion !== SETTINGS_VERSION) throw new SnapshotValidationError("Unsupported settings version");
   const value: Record<string, unknown> = { ...rawValue, config: normalizeSettings(rawValue.config) };
-  if (typeof value.updatedAt !== "string" || !value.updatedAt.endsWith("+08:00") || Number.isNaN(Date.parse(value.updatedAt))) {
+  if (!isEastEightTimestamp(value.updatedAt)) {
     throw new SnapshotValidationError("Snapshot timestamp must use the +08:00 offset");
   }
   const config = value.config as unknown as Record<string, unknown> | undefined;
@@ -391,12 +391,37 @@ export function validateSnapshot(input: unknown): Snapshot {
   } satisfies Snapshot;
 
   if (snapshotBytes(snapshot) > MAX_SNAPSHOT_BYTES) {
-    throw new SnapshotValidationError("firstlight.json exceeds the 10 MiB GitHub Gist limit");
+    throw new SnapshotValidationError("Business snapshot exceeds the 10 MiB limit before Notes compression");
   }
   return canonicalSnapshot(snapshot);
 }
 
-export function parseSnapshot(text: string): Snapshot {
+export type SettingsRepair = "none" | "fields" | "reset";
+
+export function inspectSettings(raw: unknown): { settings: ReturnType<typeof normalizeSettings>; repair: SettingsRepair; fields: string[] } {
+  const settings = normalizeSettings(raw);
+  const invalidRoot = !raw || typeof raw !== "object" || Array.isArray(raw);
+  const fields: string[] = [];
+  const inspect = (before: unknown, after: unknown, path: string) => {
+    if (fields.length >= 8 || stableStringify(before) === stableStringify(after)) return;
+    if (before && after && typeof before === "object" && typeof after === "object" && !Array.isArray(before) && !Array.isArray(after)) {
+      for (const key of Object.keys(after))
+        inspect((before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], path ? `${path}.${key}` : key);
+    } else fields.push(path || "config");
+  };
+  if (!invalidRoot) inspect(raw, settings, "");
+  return { settings, repair: invalidRoot ? "reset" : stableStringify(raw) === stableStringify(settings) ? "none" : "fields", fields };
+}
+
+export function settingsRepairMessage(repair: SettingsRepair, fields: string[] = []): string | undefined {
+  return repair === "reset"
+    ? "Settings were reset to safe defaults."
+    : repair === "fields"
+      ? `Unsupported settings fields were repaired; valid settings were kept.${fields.length ? ` (${fields.join(", ")})` : ""}`
+      : undefined;
+}
+
+export function parseSnapshotWithDiagnostics(text: string): { snapshot: Snapshot; settingsRepair: SettingsRepair; settingsRepairFields: string[] } {
   if (encoder.encode(text).byteLength > MAX_SNAPSHOT_BYTES) {
     throw new SnapshotValidationError("firstlight.json exceeds the 10 MiB GitHub Gist limit");
   }
@@ -407,5 +432,11 @@ export function parseSnapshot(text: string): Snapshot {
     if (!(error instanceof SyntaxError)) throw error;
     throw new SnapshotValidationError("firstlight.json is not valid JSON");
   }
-  return validateSnapshot(input);
+  const snapshot = validateSnapshot(input);
+  const { repair, fields } = inspectSettings((input as Record<string, unknown>).config);
+  return { snapshot, settingsRepair: repair, settingsRepairFields: fields };
+}
+
+export function parseSnapshot(text: string): Snapshot {
+  return parseSnapshotWithDiagnostics(text).snapshot;
 }

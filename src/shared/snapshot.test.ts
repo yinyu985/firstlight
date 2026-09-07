@@ -220,7 +220,7 @@ describe("parseSnapshot", () => {
       parameters: {}
     });
     expect(parsed.config.dynamicEffectProfiles?.neuroNoise).toMatchObject({
-      speed: 4,
+      speed: 1,
       parameters: {
         colorFront: "#abc123",
         colorMid: "#def456",
@@ -238,7 +238,7 @@ describe("parseSnapshot", () => {
       from: "#445566",
       to: "#556677",
       angle: 44,
-      speed: 5,
+      speed: 1.35,
       parameters: { flakeSize: 0.019, variant: "snowflake", direction: 90 }
     });
     if (!flowProfile) throw new Error("Flow profile missing");
@@ -722,7 +722,7 @@ describe("dynamic effect range schema", () => {
     expect(silk.defaultParameters).toEqual({ scale: 2, noiseIntensity: 3, rotation: 0 });
     expect(findNumericRange(silk, "scale")).toMatchObject({ min: 0.1, max: 5, step: 0.1, defaultValue: 2 });
     expect(findNumericRange(silk, "noiseIntensity")).toMatchObject({ min: 0, max: 5, step: 0.1, defaultValue: 3 });
-    expect(findNumericRange(silk, "rotation")).toMatchObject({ min: 0, max: 6.28, step: 0.1, defaultValue: 0 });
+    expect(findNumericRange(silk, "rotation")).toMatchObject({ min: 0, max: 6.28, step: 0.01, defaultValue: 0 });
     expect(findNumericRange(smoke, "smokeCount")).toMatchObject({ min: 1, max: 6, step: 1, defaultValue: 4, integer: true });
     expect(findNumericRange(smoke, "density")).toMatchObject({ min: 0.35, max: 1.5, defaultValue: 0.9 });
     expect(findNumericRange(smoke, "turbulence")).toMatchObject({ min: 0, max: 2, defaultValue: 1 });
@@ -755,7 +755,7 @@ describe("dynamic effect range schema", () => {
       autoMotion: false
     });
     expect(findNumericRange(flash, "simResolution")).toMatchObject({ min: 32, max: 256, step: 32, defaultValue: 128, integer: true });
-    expect(findNumericRange(flash, "dyeResolution")).toMatchObject({ min: 512, max: 2048, step: 128, defaultValue: 1440, integer: true });
+    expect(findNumericRange(flash, "dyeResolution")).toMatchObject({ min: 512, max: 2048, step: 32, defaultValue: 1440, integer: true });
     expect(findNumericRange(flash, "densityDissipation")).toMatchObject({ min: 0.5, max: 10, step: 0.5, defaultValue: 3.5 });
     expect(findNumericRange(flash, "velocityDissipation")).toMatchObject({ min: 0.5, max: 5, step: 0.5, defaultValue: 2.5 });
     expect(findNumericRange(flash, "pressure")).toMatchObject({ min: 0, max: 1, step: 0.1, defaultValue: 0.1 });
@@ -819,7 +819,7 @@ describe("dynamic effect range schema", () => {
     expect(findNumericRange(galaxy, "repulsionStrength")).toMatchObject({ min: 0, max: 5, defaultValue: 2 });
     expect(galaxy.parameters.every((parameter) => typeof parameter.hint === "string" && parameter.hint.length > 0)).toBe(true);
     expect(snow.label).toBe("SNOW");
-    expect(snow.speed).toMatchObject({ min: 0.1, max: 5, step: 0.25, defaultValue: 1.35, label: "飘落速度" });
+    expect(snow.speed).toMatchObject({ min: 0.1, max: 5, step: 0.05, defaultValue: 1.35, label: "飘落速度" });
     expect(snow.defaultParameters).toEqual({
       flakeSize: 0.019,
       minFlakeSize: 2.75,
@@ -832,7 +832,7 @@ describe("dynamic effect range schema", () => {
       variant: "snowflake",
       direction: 90
     });
-    expect(findNumericRange(snow, "flakeSize")).toMatchObject({ min: 0.001, max: 0.05, step: 0.002, defaultValue: 0.019 });
+    expect(findNumericRange(snow, "flakeSize")).toMatchObject({ min: 0.001, max: 0.05, step: 0.001, defaultValue: 0.019 });
     expect(findNumericRange(snow, "minFlakeSize")).toMatchObject({ min: 0.5, max: 3, step: 0.25, defaultValue: 2.75 });
     expect(findNumericRange(snow, "pixelResolution")).toMatchObject({ min: 50, max: 2000, step: 25, defaultValue: 500, integer: true });
     expect(findNumericRange(snow, "direction")).toMatchObject({ min: 0, max: 360, step: 5, defaultValue: 90, integer: true });

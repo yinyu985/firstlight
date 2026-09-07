@@ -52,9 +52,12 @@ export interface StoredState {
   syncEnabled?: boolean;
   token?: string;
   rememberToken?: boolean;
+  /** Old token stays in its existing store until the remote rekey and local commit succeed. */
+  tokenMigration?: { id: string; gistId: string; token?: string; rememberToken: boolean };
   gistId?: string;
   gistUrl?: string;
   localUpdatedAt?: string;
+  bookmarkBarHash?: string;
   settings?: SyncedSettings;
   baseline?: import("./model").SyncBaseline;
   recoveryPoints?: RecoveryPoint[];

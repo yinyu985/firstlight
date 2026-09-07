@@ -1,5 +1,6 @@
-import { GIST_DESCRIPTION, SNAPSHOT_FILE_NAME, type Snapshot } from "./model";
-import { SnapshotValidationError, parseSnapshot, serializeSnapshot, snapshotHash, validateSnapshot } from "./snapshot";
+import { GIST_DESCRIPTION, MAX_SNAPSHOT_BYTES, SNAPSHOT_FILE_NAME, type Snapshot } from "./model";
+import { snapshotHash, validateSnapshot, type SettingsRepair } from "./snapshot";
+import { decodeGistSnapshot, encodeGistSnapshot, NotesDecryptionError } from "./notesEnvelope";
 
 interface GistFile {
   filename?: string;
@@ -15,6 +16,7 @@ interface GistResponse {
   updated_at: string;
   public: boolean;
   files: Record<string, GistFile>;
+  owner?: { id: number };
 }
 
 export interface RemoteSnapshot {
@@ -22,6 +24,8 @@ export interface RemoteSnapshot {
   htmlUrl: string;
   updatedAt: string;
   snapshot: Snapshot;
+  settingsRepair?: SettingsRepair;
+  settingsRepairFields?: string[];
 }
 
 type GitHubFailureKind = "timeout" | "interrupted" | "network";
@@ -30,11 +34,75 @@ export class GitHubError extends Error {
   constructor(
     message: string,
     readonly status?: number,
-    readonly kind?: GitHubFailureKind
+    readonly kind?: GitHubFailureKind,
+    readonly retryAt?: number,
+    readonly rateLimited = false
   ) {
     super(message);
     this.name = "GitHubError";
   }
+}
+
+export function isRetryableGitHubError(error: unknown): error is GitHubError {
+  return error instanceof GitHubError && (Boolean(error.kind) || error.rateLimited || error.status === 429 || (error.status ?? 0) >= 500);
+}
+
+/** Count received bytes before decoding or allocating one unbounded string. */
+export async function readBoundedText(response: Response, limit: number): Promise<string> {
+  const declared = Number(response.headers.get("Content-Length"));
+  if (declared > limit) {
+    await response.body?.cancel();
+    throw new GitHubError("GitHub response exceeds the supported download size");
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel();
+        throw new GitHubError("GitHub response exceeds the supported download size");
+      }
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return parts.join("");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function transportError(error: unknown): unknown {
+  if (error instanceof GitHubError) return error;
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (name === "TimeoutError" || /timed?\s*out|timeout/iu.test(message)) return new GitHubError("GitHub request timed out", undefined, "timeout");
+  if (name === "AbortError" || /abort|interrupt/iu.test(message))
+    return new GitHubError("GitHub request was interrupted by Chrome. Please retry.", undefined, "interrupted");
+  if (error instanceof TypeError) return new GitHubError("GitHub request failed because of a network error", undefined, "network");
+  return error;
+}
+
+function httpError(response: Response, detail: string): GitHubError {
+  const retryAfter = response.headers.get("Retry-After");
+  const seconds = retryAfter === null ? NaN : Number(retryAfter);
+  const reset = Number(response.headers.get("X-RateLimit-Reset")) * 1000;
+  const retryAt = retryAfter ? (Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Date.parse(retryAfter)) : reset || undefined;
+  const rateLimited =
+    response.status === 429 ||
+    (response.status === 403 && (response.headers.get("X-RateLimit-Remaining") === "0" || retryAfter !== null || /rate limit/iu.test(detail)));
+  return new GitHubError(
+    detail || `GitHub request failed (${response.status})`,
+    response.status,
+    undefined,
+    Number.isFinite(retryAt) ? retryAt : undefined,
+    rateLimited
+  );
 }
 
 export function normalizeGitHubToken(input: string): string {
@@ -57,8 +125,12 @@ export function normalizeGitHubToken(input: string): string {
 
 export class GistClient {
   private readonly token: string;
+  private readonly verifiedReads = new WeakMap<RemoteSnapshot, string>();
 
-  constructor(token: string) {
+  constructor(
+    token: string,
+    private readonly signal?: AbortSignal
+  ) {
     this.token = normalizeGitHubToken(token);
   }
 
@@ -67,12 +139,13 @@ export class GistClient {
     const retryableMethod = method === "GET" || method === "PATCH";
     const attempts = retryableMethod ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      let response: Response;
       try {
-        response = await fetch(url, {
+        this.signal?.throwIfAborted();
+        const timeout = AbortSignal.timeout(15_000);
+        const response = await fetch(url, {
           ...init,
           cache: "no-store",
-          signal: init?.signal ?? AbortSignal.timeout(15_000),
+          signal: this.signal ? AbortSignal.any([this.signal, timeout]) : timeout,
           headers: {
             Accept: "application/vnd.github+json",
             Authorization: `Bearer ${this.token}`,
@@ -80,28 +153,24 @@ export class GistClient {
             ...init?.headers
           }
         });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
-        const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
-        const networkFailure = error instanceof TypeError;
-        if (retryableMethod && attempt + 1 < attempts && (timedOut || interrupted || networkFailure)) continue;
-        if (timedOut) throw new GitHubError("GitHub request timed out", undefined, "timeout");
-        if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.", undefined, "interrupted");
-        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error", undefined, "network");
-        throw error;
-      }
-      if (!response.ok) {
-        if (method === "GET" && response.status >= 500 && attempt + 1 < attempts) continue;
-        let detail = "";
-        try {
-          detail = ((await response.json()) as { message?: string }).message ?? "";
-        } catch {
-          /* noop */
+        const text = await readBoundedText(response, response.ok ? MAX_SNAPSHOT_BYTES * 6 + 1024 * 1024 : 256 * 1024);
+        if (!response.ok) {
+          let detail = "";
+          try {
+            detail = (JSON.parse(text) as { message?: string }).message ?? "";
+          } catch {
+            /* optional API detail */
+          }
+          if (method === "GET" && response.status >= 500 && attempt + 1 < attempts) continue;
+          throw httpError(response, detail);
         }
-        throw new GitHubError(detail || `GitHub request failed (${response.status})`, response.status);
+        return JSON.parse(text) as T;
+      } catch (error) {
+        this.signal?.throwIfAborted();
+        const failure = transportError(error);
+        if (retryableMethod && attempt + 1 < attempts && failure instanceof GitHubError && failure.kind) continue;
+        throw failure;
       }
-      return response.json() as Promise<T>;
     }
     throw new GitHubError("GitHub did not return a response");
   }
@@ -119,30 +188,30 @@ export class GistClient {
   }
 
   private async readRawFile(rawUrl: string): Promise<string> {
+    const parsed = new URL(rawUrl);
+    if (parsed.origin !== "https://gist.githubusercontent.com" || parsed.username || parsed.password)
+      throw new GitHubError("GitHub returned an unsupported snapshot URL");
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      let response: Response;
       try {
-        response = await fetch(rawUrl, {
+        this.signal?.throwIfAborted();
+        const timeout = AbortSignal.timeout(15_000);
+        const response = await fetch(rawUrl, {
           cache: "no-store",
-          signal: AbortSignal.timeout(15_000),
+          signal: this.signal ? AbortSignal.any([this.signal, timeout]) : timeout,
           headers: { Authorization: `Bearer ${this.token}` }
         });
+        const text = await readBoundedText(response, MAX_SNAPSHOT_BYTES);
+        if (!response.ok) {
+          if (response.status >= 500 && attempt === 0) continue;
+          throw httpError(response, `Failed to read the complete snapshot (${response.status})`);
+        }
+        return text;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const timedOut = (error instanceof DOMException && error.name === "TimeoutError") || /timed?\s*out|timeout/iu.test(message);
-        const interrupted = (error instanceof DOMException && error.name === "AbortError") || /abort|interrupt/iu.test(message);
-        const networkFailure = error instanceof TypeError;
-        if (attempt === 0 && (timedOut || interrupted || networkFailure)) continue;
-        if (timedOut) throw new GitHubError("GitHub request timed out");
-        if (interrupted) throw new GitHubError("GitHub request was interrupted by Chrome. Please retry.");
-        if (networkFailure) throw new GitHubError("GitHub request failed because of a network error");
-        throw error;
+        this.signal?.throwIfAborted();
+        const failure = transportError(error);
+        if (attempt === 0 && failure instanceof GitHubError && failure.kind) continue;
+        throw failure;
       }
-      if (!response.ok) {
-        if (response.status >= 500 && attempt === 0) continue;
-        throw new GitHubError(`Failed to read the complete snapshot (${response.status})`, response.status);
-      }
-      return response.text();
     }
     throw new GitHubError("GitHub did not return the complete snapshot");
   }
@@ -162,6 +231,10 @@ export class GistClient {
 
   async read(gistId: string): Promise<RemoteSnapshot> {
     const gist = await this.getSecretGist(gistId);
+    return this.decodeRemote(gist, this.token);
+  }
+
+  private async decodeRemote(gist: GistResponse, decryptionToken: string): Promise<RemoteSnapshot> {
     const file = gist.files[SNAPSHOT_FILE_NAME];
     if (!file) throw new GitHubError(`${SNAPSHOT_FILE_NAME} is missing from the Gist`);
     let content = file.content;
@@ -169,20 +242,42 @@ export class GistClient {
       if (!file.raw_url) throw new GitHubError("GitHub did not return a complete snapshot URL");
       content = await this.readRawFile(file.raw_url);
     }
-    return {
+    const remote: RemoteSnapshot = {
       gistId: gist.id,
       htmlUrl: gist.html_url,
       updatedAt: gist.updated_at,
-      snapshot: parseSnapshot(content)
+      ...(await decodeGistSnapshot(content, decryptionToken, this.signal))
     };
+    this.verifiedReads.set(remote, gist.id);
+    return remote;
+  }
+
+  /** Requests use the new credential even when the old token has been revoked. */
+  async rekey(gistId: string, oldToken?: string, beforeWrite?: () => Promise<void>): Promise<RemoteSnapshot> {
+    const gist = await this.getSecretGist(gistId);
+    const user = await this.request<{ id: number }>("https://api.github.com/user");
+    if (!Number.isSafeInteger(user.id) || user.id !== gist.owner?.id) throw new GitHubError("Token migration is only allowed for your own Gist");
+    try {
+      // A previous PATCH may have succeeded before its acknowledgement or local commit failed.
+      return await this.decodeRemote(gist, this.token);
+    } catch (error) {
+      if (!(error instanceof NotesDecryptionError)) throw error;
+      if (!oldToken) throw new NotesDecryptionError();
+    }
+    const remote = await this.decodeRemote(gist, normalizeGitHubToken(oldToken));
+    await beforeWrite?.();
+    return this.update(gistId, remote.snapshot, remote);
   }
 
   async create(snapshot: Snapshot): Promise<RemoteSnapshot> {
     return this.write(undefined, snapshot);
   }
 
-  async update(gistId: string, snapshot: Snapshot): Promise<RemoteSnapshot> {
-    await this.getSecretGist(gistId);
+  async update(gistId: string, snapshot: Snapshot, readForThisOperation?: RemoteSnapshot): Promise<RemoteSnapshot> {
+    // Only a read produced by this client can replace the preflight, once.
+    const alreadyChecked = readForThisOperation !== undefined && this.verifiedReads.get(readForThisOperation) === gistId;
+    if (readForThisOperation) this.verifiedReads.delete(readForThisOperation);
+    if (!alreadyChecked) await this.read(gistId);
     return this.write(gistId, snapshot);
   }
 
@@ -197,7 +292,7 @@ export class GistClient {
 
   private async write(gistId: string | undefined, snapshot: Snapshot): Promise<RemoteSnapshot> {
     const canonical = validateSnapshot(snapshot);
-    const content = serializeSnapshot(canonical);
+    const content = await encodeGistSnapshot(canonical, this.token, this.signal);
     const expectedHash = await snapshotHash(canonical);
     const body: {
       description: string;
@@ -228,28 +323,8 @@ export class GistClient {
       throw error;
     }
     this.assertSecretGist(gist);
-    const file = gist.files[SNAPSHOT_FILE_NAME];
-    let remote: RemoteSnapshot;
-    let independentlyRead = false;
-    if (file && !file.truncated && typeof file.content === "string") {
-      try {
-        remote = {
-          gistId: gist.id,
-          htmlUrl: gist.html_url,
-          updatedAt: gist.updated_at,
-          snapshot: parseSnapshot(file.content)
-        };
-      } catch (error) {
-        if (!(error instanceof SnapshotValidationError)) throw error;
-        remote = await this.read(gist.id);
-        independentlyRead = true;
-      }
-    } else {
-      remote = await this.read(gist.id);
-      independentlyRead = true;
-    }
-    if ((await snapshotHash(remote.snapshot)) === expectedHash) return remote;
-    if (!independentlyRead) remote = await this.read(gist.id);
+    // A write response is an acknowledgement, not an independent readback.
+    const remote = await this.read(gist.id);
     if ((await snapshotHash(remote.snapshot)) !== expectedHash) {
       throw new GitHubError("GitHub stored a different Firstlight snapshot than the one that was uploaded");
     }
