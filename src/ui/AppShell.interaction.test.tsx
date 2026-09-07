@@ -67,10 +67,9 @@ describe("AppShell interactions", () => {
     await input(control<HTMLInputElement>("Note title"), "A note");
     await input(control<HTMLTextAreaElement>("Note content"), "My content");
     expect(document.querySelector(".notes-item-title")?.textContent).toBe("A note");
-    await click(control("Sort notes"));
-    const created = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent === "CREATED")!;
+    const created = [...document.querySelectorAll<HTMLButtonElement>(".notes-sort-row button")].find((button) => button.textContent === "CREATED")!;
     await click(created);
-    expect(control("Sort notes").textContent).toContain("CREATED");
+    expect(created.getAttribute("aria-pressed")).toBe("true");
     await key(control("Note content"), "Escape");
     expect(document.querySelector(".notes-window")).toBeNull();
   });

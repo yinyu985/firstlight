@@ -17,6 +17,17 @@ function diff(): DiffPayload {
 }
 
 describe("diff rendering budget", () => {
+  it("counts IDs, timestamps and JSON structure when selecting summary mode", async () => {
+    const value = diff();
+    value.left.notes = Array.from({ length: 2400 }, (_, index) => ({
+      id: String(index),
+      name: "",
+      content: "",
+      createtime: "2026-08-20T17:00:00.000+08:00",
+      updatetime: "2026-08-20T17:00:00.000+08:00"
+    }));
+    expect((await prepareDiffDocuments(value)).summarized).toBe(true);
+  });
   it("retains detailed JSON for ordinary snapshots", async () => {
     const value = diff();
     value.left.bookmarks.push({ title: "Local", url: "https://local.test" });

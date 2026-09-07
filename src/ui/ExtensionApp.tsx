@@ -3,6 +3,7 @@ import { normalizeSettings, type SyncNote, type SyncedSettings } from "../shared
 import type { AppState, ExtensionRequest, ExtensionResponse } from "../shared/protocol";
 import { AppShell } from "./AppShell";
 import { applyStatePatch, type StatePatch } from "../shared/statePatch";
+import { clearPendingNotes, keepPendingNotes, readPendingNotes } from "./notes/pendingNotes";
 
 let serverState: AppState | undefined;
 
@@ -61,6 +62,10 @@ export function ExtensionApp() {
   const pendingSettings = useRef<SyncedSettings | undefined>(undefined);
   const pendingNotes = useRef<SyncNote[] | undefined>(undefined);
   const notesGeneration = useRef(0);
+  const notesRetryTimer = useRef<number | undefined>(undefined);
+  const notesQueue = useRef<Promise<void>>(Promise.resolve());
+  const notesJobs = useRef(new WeakMap<SyncNote[], Promise<void>>());
+  const saveNotesRef = useRef<(notes: SyncNote[]) => Promise<void>>(async () => undefined);
   const settingsGeneration = useRef(0);
   const settingsTimer = useRef<number | undefined>(undefined);
   const settingsRetryTimer = useRef<number | undefined>(undefined);
@@ -87,7 +92,15 @@ export function ExtensionApp() {
 
   useEffect(() => {
     void request({ type: "GET_STATE" })
-      .then(acceptState)
+      .then((next) => {
+        try {
+          pendingNotes.current ??= readPendingNotes();
+        } catch {
+          setError("The pending Notes draft could not be read and was left unchanged.");
+        }
+        acceptState(next);
+        if (pendingNotes.current) void saveNotesRef.current(pendingNotes.current).catch(() => undefined);
+      })
       .catch((cause) => setError(cause.message));
     const listener = (message: { type?: string; patch?: StatePatch }) => {
       if (message.type === "STATE_CHANGED" && message.patch && serverState) {
@@ -96,7 +109,25 @@ export function ExtensionApp() {
       }
     };
     chrome.runtime.onMessage.addListener(listener);
+    const flush = () => {
+      const notes = pendingNotes.current;
+      if (notes) {
+        try {
+          keepPendingNotes(notes);
+        } catch {
+          setError("Unable to back up pending Notes. Keep this tab open until saving succeeds.");
+        }
+        // Dispatch synchronously from pagehide; the worker owns the write after the page exits.
+        void request({ type: "SAVE_NOTES", notes }).catch(() => undefined);
+      }
+      const settings = pendingSettings.current;
+      if (settings) void request({ type: "SAVE_SETTINGS", settings }).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", flush);
     return () => {
+      window.removeEventListener("pagehide", flush);
+      if (notesRetryTimer.current !== undefined) window.clearTimeout(notesRetryTimer.current);
+      flush();
       chrome.runtime.onMessage.removeListener(listener);
       if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
       if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
@@ -205,6 +236,7 @@ export function ExtensionApp() {
     setState((current) => (current ? { ...current, settings } : current));
     if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
     if (settingsRetryTimer.current !== undefined) window.clearTimeout(settingsRetryTimer.current);
+    settingsRetryTimer.current = undefined;
     settingsTimer.current = window.setTimeout(() => {
       settingsTimer.current = undefined;
       void submitPendingSettingsRef.current().catch(() => undefined);
@@ -212,23 +244,56 @@ export function ExtensionApp() {
   }, []);
 
   const saveNotes = useCallback(
-    async (notes: SyncNote[]) => {
+    (notes: SyncNote[]): Promise<void> => {
+      const existing = notesJobs.current.get(notes);
+      if (existing) return existing;
       const generation = notesGeneration.current;
-      pendingNotes.current = notes;
-      try {
-        const next = await request({ type: "SAVE_NOTES", notes });
-        if (generation !== notesGeneration.current) return;
-        if (pendingNotes.current === notes) pendingNotes.current = undefined;
-        setError(undefined);
-        acceptState(next);
-      } catch (cause) {
-        if (generation !== notesGeneration.current) return;
-        setError(cause instanceof Error ? cause.message : "Unable to save notes");
-        throw cause;
-      }
+      pendingNotes.current ??= notes;
+      setState((current) => (current ? { ...current, notes: pendingNotes.current } : current));
+      const task = notesQueue.current
+        .then(async () => {
+          if (generation !== notesGeneration.current || pendingNotes.current !== notes) return;
+          const next = await request({ type: "SAVE_NOTES", notes });
+          if (generation !== notesGeneration.current) return;
+          if (pendingNotes.current === notes) {
+            clearPendingNotes();
+            pendingNotes.current = undefined;
+          }
+          setError(undefined);
+          acceptState(next);
+        })
+        .catch((cause) => {
+          if (generation !== notesGeneration.current) return;
+          setError(cause instanceof Error ? cause.message : "Unable to save notes");
+          if (pendingNotes.current) {
+            try {
+              keepPendingNotes(pendingNotes.current);
+            } catch {
+              /* The live draft and worker retry remain intact. */
+            }
+            if (notesRetryTimer.current === undefined)
+              notesRetryTimer.current = window.setTimeout(() => {
+                notesRetryTimer.current = undefined;
+                if (pendingNotes.current) void saveNotesRef.current(pendingNotes.current).catch(() => undefined);
+              }, 1_000);
+          }
+          throw cause;
+        });
+      notesQueue.current = task.catch(() => undefined);
+      notesJobs.current.set(notes, task);
+      void task.then(
+        () => notesJobs.current.delete(notes),
+        () => notesJobs.current.delete(notes)
+      );
+      return task;
     },
     [acceptState]
   );
+  saveNotesRef.current = saveNotes;
+
+  const draftNotes = useCallback((notes: SyncNote[]) => {
+    pendingNotes.current = notes;
+  }, []);
 
   if (!state)
     return (
@@ -263,12 +328,29 @@ export function ExtensionApp() {
       onUseRemote={async (diffId) => {
         cancelPendingSettings();
         notesGeneration.current += 1;
+        const draft = pendingNotes.current;
         pendingNotes.current = undefined;
-        if (!(await act({ type: "USE_REMOTE", diffId }))) throw new Error("Unable to restore the remote snapshot");
+        if (notesRetryTimer.current !== undefined) window.clearTimeout(notesRetryTimer.current);
+        notesRetryTimer.current = undefined;
+        try {
+          clearPendingNotes();
+        } catch {
+          pendingNotes.current = draft;
+          setError("Unable to clear the pending Notes draft. Remote restore was not started.");
+          throw new Error("Unable to clear the pending Notes draft");
+        }
+        if (!(await act({ type: "USE_REMOTE", diffId }))) {
+          if (draft) {
+            pendingNotes.current = draft;
+            void saveNotes(draft).catch(() => undefined);
+          }
+          throw new Error("Unable to restore the remote snapshot");
+        }
       }}
       onCloseDiff={(diffId) => void act({ type: "CLEAR_DIFF", diffId })}
       onOpenBookmarkManager={() => void act({ type: "OPEN_BOOKMARK_MANAGER" })}
       onSaveNotes={saveNotes}
+      onDraftNotes={draftNotes}
     />
   );
 }

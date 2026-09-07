@@ -11,6 +11,7 @@ interface Props<T> {
   columnGap?: number;
   minimumRows?: number;
   empty?: ReactNode;
+  isFocusable?: (item: T) => boolean;
 }
 
 export function virtualRange(count: number, columns: number, rowHeight: number, offset: number, height: number) {
@@ -30,7 +31,8 @@ export function VirtualItems<T>({
   columnWidth,
   columnGap = 0,
   minimumRows = 0,
-  empty
+  empty,
+  isFocusable
 }: Props<T>) {
   const ownRef = useRef<HTMLDivElement>(null);
   const ref = hostRef ?? ownRef;
@@ -94,6 +96,9 @@ export function VirtualItems<T>({
           if (!event.shiftKey && event.target === controls.at(-1) && index === end - 1 && index < items.length - 1) next = index + 1;
         }
         if (next === undefined || next < 0 || next >= items.length) return;
+        const step = event.key === "End" || event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey) ? -1 : 1;
+        while (next >= 0 && next < items.length && isFocusable && !isFocusable(items[next])) next += step;
+        if (next < 0 || next >= items.length) return;
         event.preventDefault();
         event.stopPropagation();
         const first = Math.max(0, Math.floor(next / columns) - 6) * columns;

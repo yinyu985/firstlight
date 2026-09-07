@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from "../shared/model";
 import type { AppState, ExtensionRequest } from "../shared/protocol";
 import { applyStatePatch, type StatePatch } from "../shared/statePatch";
 import { ExtensionApp } from "./ExtensionApp";
-import { click, control, input, mountUi } from "./testing";
+import { click, control, input, key, mountUi } from "./testing";
 
 vi.mock("./DynamicBackground", () => ({ DynamicBackground: () => null }));
 let mounted: Awaited<ReturnType<typeof mountUi>> | undefined;
@@ -61,6 +61,49 @@ async function mountExtension() {
 }
 
 describe("extension UI state transport", () => {
+  it("flushes an immediate pagehide and retains one backup until acknowledgement", async () => {
+    const backend = await mountExtension();
+    await click(control("Open note panel"));
+    await click(control("Create new note"));
+    await input(control<HTMLTextAreaElement>("Note content"), "Before immediate refresh");
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(backend.getState().notes?.[0].content).toBe("Before immediate refresh");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(localStorage.getItem("firstlight.extension.pending-notes")).toBeNull();
+  });
+
+  it("retries Notes after the Notes window is closed and shows failures outside settings", async () => {
+    const backend = await mountExtension();
+    await click(control("Open note panel"));
+    await click(control("Create new note"));
+    await input(control<HTMLTextAreaElement>("Note content"), "Keep after closing");
+    backend.sendMessage.mockRejectedValueOnce(new Error("Notes storage unavailable"));
+    await key(control("Note content"), "Escape");
+    expect(document.querySelector(".notes-window")).toBeNull();
+    expect(document.querySelector(".settings-drawer")).toBeNull();
+    expect(document.querySelector(".sync-toast")?.textContent).toContain("Notes storage unavailable");
+    expect(localStorage.getItem("firstlight.extension.pending-notes")).toContain("Keep after closing");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(backend.getState().notes?.[0].content).toBe("Keep after closing");
+    expect(localStorage.getItem("firstlight.extension.pending-notes")).toBeNull();
+  });
+
+  it("replays an unacknowledged page draft on reload", async () => {
+    const time = "2026-08-20T17:00:00.000+08:00";
+    localStorage.setItem(
+      "firstlight.extension.pending-notes",
+      JSON.stringify([{ id: "a", name: "Recovered", content: "Saved draft", createtime: time, updatetime: time }])
+    );
+    const backend = await mountExtension();
+    expect(backend.getState().notes?.[0].content).toBe("Saved draft");
+    expect(localStorage.getItem("firstlight.extension.pending-notes")).toBeNull();
+  });
   it("merges compact settings responses without losing bookmarks and retries a failed save", async () => {
     const backend = await mountExtension();
     await click(control("Open settings"));
@@ -90,5 +133,23 @@ describe("extension UI state transport", () => {
       await vi.advanceTimersByTimeAsync(400);
     });
     expect(backend.getState().notes?.[0].content).toBe("Unacknowledged input");
+  });
+});
+
+describe("settings retry regressions", () => {
+  it("retries settings after a second edit replaces a scheduled retry", async () => {
+    const backend = await mountExtension();
+    await click(control("Open settings"));
+    backend.sendMessage.mockRejectedValueOnce(new Error("first outage"));
+    await input(control<HTMLInputElement>("Text size"), "18");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+    backend.sendMessage.mockRejectedValueOnce(new Error("second outage"));
+    await input(control<HTMLInputElement>("Text size"), "19");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2150);
+    });
+    expect(backend.getState().settings.foreground.fontSize).toBe(19);
   });
 });

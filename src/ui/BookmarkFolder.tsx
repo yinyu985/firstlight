@@ -41,6 +41,7 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
       className="folder-list"
       hostRef={hostRef}
       items={visible}
+      isFocusable={({ item }) => item.children !== undefined || (item.url !== undefined && canOpenBookmark(item.url))}
       rowHeight={rowHeight}
       empty={<div className="folder-empty">EMPTY</div>}
       renderItem={({ item, depth }, index) => {
@@ -122,17 +123,33 @@ export function FolderPopover({
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
   const [maxHeight, setMaxHeight] = useState(240);
+  const [above, setAbove] = useState(false);
+  const [shiftX, setShiftX] = useState(0);
   const [scrollbar, setScrollbar] = useState<FolderScrollbarState>({ visible: false, offset: 0, length: FOLDER_SCROLLBAR_MAX_LENGTH });
   const theme = useLocalPanelTheme(ref, background, foreground);
   useLayoutEffect(() => {
     const fit = () => {
       if (!ref.current) return;
-      const top = ref.current.getBoundingClientRect().top;
-      setMaxHeight(Math.max(72, window.innerHeight - top - 14));
+      const anchor = ref.current.parentElement?.getBoundingClientRect();
+      if (!anchor) return;
+      const belowSpace = Math.max(1, window.innerHeight - anchor.bottom - 14);
+      const aboveSpace = Math.max(1, anchor.top - 14);
+      const upwards = belowSpace < 160 && aboveSpace > belowSpace;
+      setAbove(upwards);
+      setMaxHeight(Math.max(1, Math.min(window.innerHeight - 28, upwards ? aboveSpace : belowSpace)));
+      setShiftX(Math.min(0, window.innerWidth - anchor.right - 14) + Math.max(0, 14 - anchor.left));
     };
     fit();
+    const observer = new ResizeObserver(fit);
+    const anchor = ref.current?.parentElement;
+    if (anchor) observer.observe(anchor);
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    document.addEventListener("scroll", fit, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+      document.removeEventListener("scroll", fit, true);
+    };
   }, []);
   useLayoutEffect(() => {
     const scrollArea = scrollRef.current;
@@ -156,7 +173,16 @@ export function FolderPopover({
   };
 
   return (
-    <div className="folder-popover" ref={ref} style={{ maxHeight, ...localThemeVariables(theme) }}>
+    <div
+      className="folder-popover"
+      data-placement={above ? "top" : "bottom"}
+      ref={ref}
+      style={{
+        maxHeight,
+        left: shiftX,
+        ...localThemeVariables(theme)
+      }}
+    >
       <div className="folder-scroll-area" ref={scrollRef} onScroll={(event) => setScrollbar(folderScrollbarState(event.currentTarget))}>
         <div className="folder-scroll-content">
           <FolderList nodes={nodes} onOpen={onOpen} showDetails={showDetails} />

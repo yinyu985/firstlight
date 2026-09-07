@@ -26,7 +26,7 @@ export async function prepareDiffDocuments(diff: DiffPayload): Promise<{ left: s
   const left = metrics(diff.left);
   const right = metrics(diff.right);
   const summarized = [left, right].some((item) => item.characters > MAX_DIFF_CHARACTERS || item.bookmarks + item.folders + item.notes > MAX_DIFF_ITEMS);
-  if (summarized) {
+  const summarize = () => {
     const summary = (snapshot: Snapshot, hash: string, stats: ReturnType<typeof metrics>) =>
       JSON.stringify(
         {
@@ -38,9 +38,11 @@ export async function prepareDiffDocuments(diff: DiffPayload): Promise<{ left: s
         null,
         2
       );
-    return { left: summary(diff.left, diff.leftHash, left), right: summary(diff.right, diff.rightHash, right), summarized };
-  }
+    return { left: summary(diff.left, diff.leftHash, left), right: summary(diff.right, diff.rightHash, right), summarized: true };
+  };
+  if (summarized) return summarize();
   const documents = await Promise.all([prettySnapshot(diff.left), prettySnapshot(diff.right)]);
+  if (documents.some((document) => document.length > MAX_DIFF_CHARACTERS)) return summarize();
   return { left: documents[0], right: documents[1], summarized };
 }
 

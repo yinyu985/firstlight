@@ -87,6 +87,7 @@ export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }:
     closeRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         event.preventDefault();
         setClosing(true);
         onCloseRef.current();
@@ -161,6 +162,9 @@ export function DiffView({ diff, busy = false, onClose, onUseLeft, onUseRight }:
       <section className="diff-dialog" ref={dialog}>
         <header className="diff-header">
           <h2>SNAPSHOT DIFF</h2>
+          <a className="diff-gist-link" href={`https://gist.github.com/${encodeURIComponent(diff.gistId)}`} target="_blank" rel="noopener noreferrer">
+            OPEN GIST ↗
+          </a>
           <button ref={closeRef} className="icon-button" onClick={() => dismiss(onClose)} aria-label="Close">
             <X size={20} />
           </button>

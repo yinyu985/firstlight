@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GistClient, normalizeGitHubToken } from "../shared/gist";
-import { createDataBookmarkId, dataBookmarkViewerUrl, stageDataBookmark } from "../shared/dataBookmarkStore";
-import { DEFAULT_SETTINGS, canonicalSettings, snapshotFrom, type Snapshot, type SyncedSettings } from "../shared/model";
+import { cleanDataBookmarks, createDataBookmarkId, dataBookmarkViewerUrl, stageDataBookmark } from "../shared/dataBookmarkStore";
+import { DEFAULT_SETTINGS, canonicalSettings, type Snapshot, type SyncedSettings } from "../shared/model";
 import type { AppState } from "../shared/protocol";
-import { validateSnapshot } from "../shared/snapshot";
+import { inspectSettings, settingsRepairMessage } from "../shared/snapshot";
 import { isDataBookmarkUrl } from "../shared/url";
 import { AppShell } from "./AppShell";
 import { readOnlineToken, saveOnlineToken } from "./tokenStorage";
@@ -27,23 +27,13 @@ function writeStorage(key: string, value: string): boolean {
   }
 }
 
-function removeStorage(key: string): boolean {
-  try {
-    localStorage.removeItem(key);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function localSettings(): SyncedSettings | undefined {
   const raw = readStorage(SETTINGS_KEY);
   if (!raw) return undefined;
   try {
-    return validateSnapshot(snapshotFrom([], JSON.parse(raw))).config;
+    return inspectSettings(JSON.parse(raw)).settings;
   } catch {
-    removeStorage(SETTINGS_KEY);
-    return undefined;
+    return DEFAULT_SETTINGS;
   }
 }
 
@@ -77,11 +67,15 @@ export function OnlineApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const connectGeneration = useRef(0);
+  const connectionAbort = useRef<AbortController | undefined>(undefined);
   const startupConnection = useRef(readOnlineToken());
   const settingsTimer = useRef<number | undefined>(undefined);
   const pendingSettings = useRef<SyncedSettings | undefined>(undefined);
 
   const connect = useCallback(async (token: string, rememberToken = false) => {
+    connectionAbort.current?.abort();
+    const controller = new AbortController();
+    connectionAbort.current = controller;
     const generation = ++connectGeneration.current;
     setBusy(true);
     setError(undefined);
@@ -94,14 +88,16 @@ export function OnlineApp() {
       return;
     }
     try {
-      if (!saveOnlineToken("", false)) throw new Error("Unable to clear the previous connection from this browser");
+      const saved = readOnlineToken();
+      const reconnecting = saved.token === token.trim();
+      if (!reconnecting && !saveOnlineToken("", false)) throw new Error("Unable to clear the previous connection from this browser");
       const normalizedToken = normalizeGitHubToken(token);
       setState((current) => ({
         ...onlineState(undefined, normalizedToken, undefined, "Connecting…", undefined, rememberToken),
         settings: current.settings,
         sync: { phase: "discovering", message: "Connecting…" }
       }));
-      const client = new GistClient(normalizedToken);
+      const client = new GistClient(normalizedToken, controller.signal);
       const found = await client.discover();
       if (generation !== connectGeneration.current) return;
       if (!found.length) {
@@ -115,6 +111,7 @@ export function OnlineApp() {
         const stored = saveOnlineToken(normalizedToken, rememberToken);
         setState(onlineState(remote.snapshot, normalizedToken, remote.htmlUrl, "Remote snapshot / read only", remote.gistId, rememberToken));
         if (!stored) setError("Connected, but the connection could not be saved locally");
+        else if (remote.settingsRepair && remote.settingsRepair !== "none") setError(settingsRepairMessage(remote.settingsRepair, remote.settingsRepairFields));
       }
     } catch (cause) {
       if (generation === connectGeneration.current) {
@@ -136,33 +133,51 @@ export function OnlineApp() {
     }
   }, []);
 
+  const flushSettings = useCallback(() => {
+    if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
+    settingsTimer.current = undefined;
+    const pending = pendingSettings.current;
+    if (!pending) return;
+    if (writeStorage(SETTINGS_KEY, JSON.stringify(pending))) {
+      if (pendingSettings.current === pending) pendingSettings.current = undefined;
+      setError(undefined);
+    } else {
+      setError("Unable to save settings in this browser");
+    }
+  }, []);
+
   useEffect(() => {
+    void cleanDataBookmarks().catch(() => undefined);
     const saved = startupConnection.current;
     if (saved.token) void connect(saved.token, saved.remember);
+    const raw = readStorage(SETTINGS_KEY);
+    if (raw) {
+      try {
+        const inspected = inspectSettings(JSON.parse(raw));
+        if (inspected.repair !== "none") {
+          writeStorage(SETTINGS_KEY, JSON.stringify(inspected.settings));
+          setError(settingsRepairMessage(inspected.repair, inspected.fields));
+        }
+      } catch {
+        writeStorage(SETTINGS_KEY, JSON.stringify(DEFAULT_SETTINGS));
+        setError("Settings were reset to safe defaults.");
+      }
+    }
+    window.addEventListener("pagehide", flushSettings);
     return () => {
+      window.removeEventListener("pagehide", flushSettings);
       connectGeneration.current += 1;
-      if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
-      const settings = pendingSettings.current;
-      if (settings) writeStorage(SETTINGS_KEY, JSON.stringify(settings));
+      connectionAbort.current?.abort();
+      flushSettings();
     };
-  }, [connect]);
+  }, [connect, flushSettings]);
 
   const saveSettings = (settings: SyncedSettings) => {
     const next = canonicalSettings(settings);
     setState((current) => ({ ...current, settings: next }));
     pendingSettings.current = next;
     if (settingsTimer.current !== undefined) window.clearTimeout(settingsTimer.current);
-    settingsTimer.current = window.setTimeout(() => {
-      settingsTimer.current = undefined;
-      const pending = pendingSettings.current;
-      if (!pending) return;
-      if (writeStorage(SETTINGS_KEY, JSON.stringify(pending))) {
-        if (pendingSettings.current === pending) pendingSettings.current = undefined;
-        setError(undefined);
-      } else {
-        setError("Unable to save settings in this browser");
-      }
-    }, 120);
+    settingsTimer.current = window.setTimeout(flushSettings, 120);
   };
 
   const openBookmark = (url: string) => {
@@ -180,6 +195,7 @@ export function OnlineApp() {
         if (state.settings.openTarget === "current-tab") window.location.assign(viewerUrl);
       })
       .catch((cause: unknown) => {
+        void cleanDataBookmarks(id).catch(() => undefined);
         setError(cause instanceof Error ? cause.message : "Unable to open the data bookmark");
       });
   };

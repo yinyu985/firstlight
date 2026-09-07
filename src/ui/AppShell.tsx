@@ -55,6 +55,8 @@ import { FolderPopover } from "./BookmarkFolder";
 import { focusableElements } from "./focus";
 import { useClock } from "./useClock";
 import { NotesApp, type NotesAppHandle } from "./notes/NotesApp";
+import { UI_ERROR_EVENT } from "./uiErrors";
+import { LoadingDiff } from "./LoadingDiff";
 
 const DiffView = lazy(() => import("./DiffView"));
 const preloadDiffView = () => {
@@ -77,6 +79,7 @@ interface Props {
   onCloseDiff?: (diffId: string) => void;
   onOpenBookmarkManager?: () => void;
   onSaveNotes?: (notes: SyncNote[]) => void | Promise<void>;
+  onDraftNotes?: (notes: SyncNote[]) => void;
 }
 
 type ColorControlDynamicBackground = Exclude<DynamicBackgroundSettings, { effect: "neuroNoise" }> & {
@@ -549,7 +552,7 @@ function trapTabKey(event: ReactKeyboardEvent<HTMLElement>): void {
 }
 
 export function AppShell(props: Props) {
-  const { state } = props;
+  const { state, onCloseDiff } = props;
   const clockVisible = state.settings.clockPosition !== "hidden";
   const clock = useClock(state.settings.features.clockSeconds, clockVisible);
   const reducedMotion = useReducedMotion();
@@ -586,7 +589,7 @@ export function AppShell(props: Props) {
   const activeBackground = state.settings.background.type === "dynamic" ? normalizeDynamicBackground(state.settings.background) : state.settings.background;
   const remoteOperationActive =
     state.tokenConfigured && (state.sync.phase === "uploading" || state.sync.phase === "discovering" || state.sync.phase === "restoring");
-  const notificationMessage = showSyncNotice ? state.sync.message : visibleToast?.message;
+  const notificationMessage = visibleToast?.message ?? (showSyncNotice ? state.sync.message : undefined);
   const hasNotification = Boolean(notificationMessage);
   const diffKey = state.diff?.id;
   const visibleDiff = state.diff && diffKey !== dismissedDiffKey ? state.diff : undefined;
@@ -594,7 +597,10 @@ export function AppShell(props: Props) {
   const busy = Boolean(props.busy);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
-    window.requestAnimationFrame(() => settingsTriggerRef.current?.focus());
+    window.requestAnimationFrame(() => {
+      // Do not steal focus if the user has already moved to another control.
+      if (document.activeElement === document.body) settingsTriggerRef.current?.focus();
+    });
   }, []);
   const searchResultsTheme = useLocalPanelTheme(
     searchResultsRef,
@@ -665,11 +671,26 @@ export function AppShell(props: Props) {
 
   useEffect(() => {
     const notice = state.toast;
-    if (!notice || notice.expiresAt <= Date.now()) {
-      setVisibleToast(undefined);
-      return;
-    }
-    setVisibleToast(notice);
+    if (notice && notice.expiresAt > Date.now()) setVisibleToast(notice);
+  }, [state.toast]);
+
+  useEffect(() => {
+    if (!props.error || (state.toast?.message === props.error && state.toast.expiresAt > Date.now())) return;
+    setVisibleToast({ id: crypto.randomUUID(), message: props.error, expiresAt: Date.now() + 10_000 });
+  }, [props.error, state.toast]);
+
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      setVisibleToast({ id: crypto.randomUUID(), message, expiresAt: Date.now() + 10_000 });
+    };
+    window.addEventListener(UI_ERROR_EVENT, receive);
+    return () => window.removeEventListener(UI_ERROR_EVENT, receive);
+  }, []);
+
+  useEffect(() => {
+    const notice = visibleToast;
+    if (!notice) return;
     const timer = window.setTimeout(
       () => {
         setVisibleToast((current) => (current?.id === notice.id ? undefined : current));
@@ -677,18 +698,28 @@ export function AppShell(props: Props) {
       Math.max(0, notice.expiresAt - Date.now())
     );
     return () => window.clearTimeout(timer);
-  }, [state.toast]);
+  }, [visibleToast]);
 
   useEffect(() => {
     const closeDetachedLists = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!target.closest(".search-shell, .search-results")) setSearchResultsOpen(false);
-      if (!target.closest(".bookmark-cell-wrap.active")) setOpenFolder(null);
+      if (!target.closest(".bookmark-cell-wrap.active, .settings-trigger, .settings-drawer, .drawer-backdrop")) setOpenFolder(null);
       if (!target.closest(".status-dock") && !target.closest(".notes-window")) setNoteOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (visibleDiff && diffKey) {
+        event.preventDefault();
+        setDismissedDiffKey(diffKey);
+        onCloseDiff?.(diffKey);
+        return;
+      }
+      if (settingsOpen) {
+        closeSettings();
+        return;
+      }
       setSearchResultsOpen(false);
       setOpenFolder(null);
       setNoteOpen(false);
@@ -700,7 +731,7 @@ export function AppShell(props: Props) {
       document.removeEventListener("pointerdown", closeDetachedLists);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [closeSettings, settingsOpen]);
+  }, [closeSettings, settingsOpen, visibleDiff, diffKey, onCloseDiff]);
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -786,7 +817,9 @@ export function AppShell(props: Props) {
           "--folder-shadow": folderTheme.shadow
         } as CSSProperties
       }
-      onClick={() => setOpenFolder(null)}
+      onClick={(event) => {
+        if (event.target instanceof Element && !event.target.closest(".settings-trigger, .settings-drawer, .drawer-backdrop")) setOpenFolder(null);
+      }}
     >
       {activeBackground.type === "dynamic" && !reducedMotion && (
         <ErrorBoundary key={activeBackground.effect} name="Background" silent>
@@ -823,7 +856,14 @@ export function AppShell(props: Props) {
       </div>
       {noteOpen && (
         <ErrorBoundary name="Notes" onClose={() => setNoteOpen(false)}>
-          <NotesApp ref={notesAppRef} initialNotes={state.notes} onSave={props.onSaveNotes} readonly={readonly} externalResetKey={notesResetKey} />
+          <NotesApp
+            ref={notesAppRef}
+            initialNotes={state.notes}
+            onSave={props.onSaveNotes}
+            onDraft={props.onDraftNotes}
+            readonly={readonly}
+            externalResetKey={notesResetKey}
+          />
         </ErrorBoundary>
       )}
 
@@ -907,6 +947,7 @@ export function AppShell(props: Props) {
             className="bookmark-table"
             hostRef={gridRef}
             items={state.bookmarks}
+            isFocusable={(item) => item.children !== undefined || (item.url !== undefined && canOpenBookmark(item.url))}
             columns={gridFit.columns}
             columnWidth={gridFit.columnWidth}
             columnGap={gridFit.gap}
@@ -1390,46 +1431,43 @@ export function AppShell(props: Props) {
               </section>
 
               <section className="settings-section">
-                <div className="section-title">
+                <div className="section-title sync-section-title">
                   <span>SYNC</span>
+                  <i className={`sync-heading-status phase-${state.sync.phase}`} role="status" title={state.sync.message}>
+                    {state.sync.message}
+                  </i>
                 </div>
-                <div className="token-row">
-                  <input
-                    aria-label="GitHub token"
-                    type="text"
-                    value={token}
-                    onChange={(event) => setToken(event.target.value)}
-                    placeholder={state.tokenConfigured ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"}
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                  />
-                  <button disabled={busy || (!token.trim() && !state.tokenConfigured)} onClick={() => props.onSaveToken?.(token, rememberToken)}>
-                    {state.tokenConfigured && !token.trim() ? "CLEAR" : "SAVE"}
-                  </button>
-                </div>
-                <label className="token-preference">
-                  <input type="checkbox" checked={rememberToken} onChange={(event) => setRememberToken(event.target.checked)} />
-                  Remember token on this device
-                </label>
-                <p className="settings-help">
-                  {rememberToken
-                    ? "Saved until you disconnect. Use only on a trusted device."
-                    : readonly
-                      ? "Kept only for this tab's session."
-                      : "Kept only until the browser closes."}{" "}
-                  Bookmarks and Notes are sent to your GitHub Gist; they are not end-to-end encrypted.
-                </p>
-                <p className="settings-help">
-                  <a href="./help.html" target="_blank" rel="noopener noreferrer">
-                    CONNECTION HELP & PRIVACY ↗
-                  </a>
-                </p>
-                <p className="settings-help" role="status">
-                  {state.sync.message}
-                </p>
-                {readonly && state.gistUrl && (
+                <div className="token-settings">
+                  <div className="token-row">
+                    <input
+                      aria-label="GitHub token"
+                      type="text"
+                      value={token}
+                      onChange={(event) => setToken(event.target.value)}
+                      placeholder={state.token ? "TOKEN SAVED / CLEAR TO DISCONNECT" : "GITHUB TOKEN"}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                    />
+                    <button disabled={busy || (!token.trim() && !state.token)} onClick={() => props.onSaveToken?.(token, rememberToken)}>
+                      {state.token && !token.trim() ? "CLEAR" : "SAVE"}
+                    </button>
+                  </div>
+                  <label className="token-preference">
+                    <input type="checkbox" checked={rememberToken} onChange={(event) => setRememberToken(event.target.checked)} />
+                    Remember token on this device
+                  </label>
                   <p className="settings-help">
+                    {rememberToken
+                      ? "Saved until you disconnect. Use only on a trusted device."
+                      : readonly
+                        ? "Kept only for this tab's session."
+                        : "Kept only until the browser closes."}{" "}
+                    Bookmarks and Notes are sent to your GitHub Gist; they are not end-to-end encrypted.
+                  </p>
+                </div>
+                {readonly && state.gistUrl && (
+                  <p className="settings-help sync-source-link">
                     <a href={state.gistUrl} target="_blank" rel="noopener noreferrer">
                       OPEN SOURCE GIST ↗
                     </a>
@@ -1463,6 +1501,11 @@ export function AppShell(props: Props) {
                   {props.error}
                 </div>
               )}
+              <p className="settings-help settings-footer">
+                <a href="./help.html" target="_blank" rel="noopener noreferrer">
+                  CONNECTION HELP & PRIVACY ↗
+                </a>
+              </p>
             </div>
           </aside>
         </>
@@ -1479,9 +1522,12 @@ export function AppShell(props: Props) {
         >
           <Suspense
             fallback={
-              <div className="modal-backdrop">
-                <div className="loading-dialog">LOADING DIFF…</div>
-              </div>
+              <LoadingDiff
+                onClose={() => {
+                  setDismissedDiffKey(diffKey);
+                  props.onCloseDiff?.(diffKey);
+                }}
+              />
             }
           >
             <DiffView

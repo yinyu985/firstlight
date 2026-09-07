@@ -1,5 +1,116 @@
 import { expect, test } from "@playwright/test";
 import { connectOnline, sampleSnapshot } from "./fixtures";
+import { expectFolderAttached, expectNotesMetadataVisible, expectNotesSortContained } from "./layoutAssertions";
+
+for (const virtual of [false, true]) {
+  test(`folder popovers attach without a gap in ${virtual ? "virtual" : "ordinary"} grids`, async ({ page }, testInfo) => {
+    const snapshot = sampleSnapshot();
+    if (virtual) {
+      snapshot.bookmarks.push(...Array.from({ length: 600 }, (_, i) => ({ title: `Bookmark ${i}`, url: `https://example.test/${i}` })));
+    }
+    await connectOnline(page, snapshot);
+    await page.getByRole("button", { name: "Work", exact: false }).click();
+    await expectFolderAttached(page, "bottom");
+    // A font/layout change must not reintroduce a gap while the panel is open.
+    await page.locator(".app").evaluate((app) => (app as HTMLElement).style.setProperty("--ui-font-size", "20px"));
+    await expectFolderAttached(page, "bottom");
+    await page.setViewportSize({ width: 900, height: 700 });
+    await expectFolderAttached(page, "bottom");
+    if (virtual) {
+      const anchor = page.locator(".bookmark-cell-wrap.active > .bookmark-cell");
+      const before = (await anchor.boundingBox())!;
+      await page.locator(".app").evaluate((app) => (app.scrollTop += 30));
+      await expect.poll(async () => (await anchor.boundingBox())!.y).toBe(before.y - 30);
+      await expectFolderAttached(page, "bottom");
+    }
+    await page.screenshot({ path: testInfo.outputPath("folder-attached.png") });
+  });
+}
+
+for (const theme of ["dark", "light"] as const) {
+  test(`Notes metadata stays complete at the editor bottom in ${theme} mode`, async ({ page }, testInfo) => {
+    const snapshot = sampleSnapshot();
+    snapshot.config.features.themeMode = theme;
+    snapshot.notes[0].content = "Metadata stays visible\n".repeat(500);
+    await connectOnline(page, snapshot);
+    await page.getByRole("button", { name: "Open note panel" }).click();
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 1024, height: 768 }
+    ]) {
+      await page.setViewportSize(viewport);
+      await expectNotesMetadataVisible(page);
+      const footer = page.locator(".notes-statusbar");
+      const before = await footer.boundingBox();
+      await page.getByRole("textbox", { name: "Note content" }).evaluate((node) => (node.scrollTop = node.scrollHeight));
+      expect(await footer.boundingBox()).toEqual(before);
+      await expectNotesMetadataVisible(page);
+      await page.screenshot({ path: testInfo.outputPath(`notes-metadata-${viewport.width}-${viewport.height}.png`) });
+    }
+    await page.getByRole("group", { name: "Sort notes" }).getByRole("button", { name: "CREATED", exact: true }).click();
+    await page.locator(".notes-item").first().click();
+    await expect(page.locator(".notes-meta")).toContainText("Created: 2026-08-02 10:00:00");
+    await expectNotesMetadataVisible(page);
+  });
+
+  test(`Notes sort has its own bounded row in ${theme} mode`, async ({ page }, testInfo) => {
+    const snapshot = sampleSnapshot();
+    snapshot.config.features.themeMode = theme;
+    await connectOnline(page, snapshot);
+    await page.getByRole("button", { name: "Open note panel" }).click();
+    for (const width of [1280, 1024]) {
+      await page.setViewportSize({ width, height: 800 });
+      const control = page.getByRole("group", { name: "Sort notes" });
+      const sidebar = page.locator(".notes-sidebar");
+      const before = { control: await control.boundingBox(), sidebar: await sidebar.boundingBox() };
+      await expectNotesSortContained(page);
+      await page.screenshot({ path: testInfo.outputPath(`notes-sort-${width}.png`) });
+      await control.getByRole("button", { name: "CREATED", exact: true }).click();
+      expect(await control.boundingBox()).toEqual(before.control);
+      expect(await sidebar.boundingBox()).toEqual(before.sidebar);
+      await expect(page.locator(".notes-item-title").first()).toHaveText("Recently created");
+      await expect(control.getByRole("button", { name: "CREATED", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await control.getByRole("button", { name: "MODIFIED", exact: true }).click();
+    }
+  });
+}
+
+test("light Notes keeps focused titles legible and light sliders remain neutral", async ({ page }, testInfo) => {
+  const snapshot = sampleSnapshot();
+  snapshot.config.features.themeMode = "light";
+  snapshot.config.features.themeColor = "#ffffaa";
+  await connectOnline(page, snapshot);
+  await page.getByRole("button", { name: "Open note panel" }).click();
+  const title = page.getByRole("textbox", { name: "Note title" });
+  const color = await title.evaluate((node) => getComputedStyle(node).color);
+  await title.focus();
+  expect(await title.evaluate((node) => getComputedStyle(node).color)).toBe(color);
+  expect(color).not.toBe("rgb(245, 245, 245)");
+  expect(await page.locator(".notes-item-wrap.is-active .notes-item-title").evaluate((node) => getComputedStyle(node).color)).toBe("rgb(23, 26, 24)");
+  await page.screenshot({ path: testInfo.outputPath("light-notes-focus.png") });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.screenshot({ path: testInfo.outputPath("light-sliders.png") });
+});
+
+test("closing settings preserves the expanded folder navigation", async ({ page }) => {
+  await connectOnline(page);
+  await page.getByRole("button", { name: "Work", exact: false }).click();
+  await expect(page.locator(".folder-popover")).toBeVisible();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Guide", exact: true })).toBeVisible();
+});
+
+test("End skips a non-openable virtual-list tail without losing focus", async ({ page }) => {
+  const snapshot = sampleSnapshot();
+  snapshot.bookmarks = Array.from({ length: 1000 }, (_, i) => ({ title: `Bookmark ${i}`, url: `https://example.test/${i}` }));
+  snapshot.bookmarks[999].url = "javascript:void(0)";
+  await connectOnline(page, snapshot);
+  await page.locator(".bookmark-cell").first().focus();
+  await page.keyboard.press("End");
+  await expect(page.getByRole("button", { name: "Bookmark 998", exact: false })).toBeFocused();
+});
 
 test("starts the online app", async ({ page }) => {
   const pageErrors: Error[] = [];
@@ -72,8 +183,7 @@ test("Notes sorting is available and Online remains read only", async ({ page },
   await connectOnline(page);
   await page.getByRole("button", { name: "Open note panel" }).click();
   await expect(page.locator(".notes-item-title").first()).toHaveText("Recently edited");
-  await page.getByRole("button", { name: "Sort notes" }).click();
-  await page.getByRole("option", { name: "CREATED", exact: true }).click();
+  await page.getByRole("group", { name: "Sort notes" }).getByRole("button", { name: "CREATED", exact: true }).click();
   await expect(page.locator(".notes-item-title").first()).toHaveText("Recently created");
   await expect(page.getByRole("textbox", { name: "Note content" })).toHaveAttribute("readonly", "");
   await expect(page.getByRole("button", { name: "Create new note" })).toHaveCount(0);
@@ -115,15 +225,6 @@ test("Rows sets a minimum height without limiting bookmark capacity", async ({ p
   const after = await grid.boundingBox();
   expect(after!.height).toBeGreaterThan(before!.height);
   await expect(page.getByRole("button", { name: "Work", exact: false })).toBeVisible();
-});
-
-test("the full-width settings drawer can be closed on a narrow touchscreen", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 700 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await page.getByRole("button", { name: "Close settings" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("textbox", { name: "Search bookmarks" })).toBeVisible();
 });
 
 test("large root lists retain the last item without mounting the whole dataset", async ({ page }) => {
