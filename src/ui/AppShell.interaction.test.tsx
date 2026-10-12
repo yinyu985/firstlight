@@ -2,7 +2,7 @@
 import { act, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
-import { DEFAULT_SETTINGS, type SyncedSettings } from "../shared/model";
+import { DEFAULT_SETTINGS, type BookmarkItem, type SyncedSettings } from "../shared/model";
 import type { AppState } from "../shared/protocol";
 import { click, control, input, key, mountUi } from "./testing";
 
@@ -13,10 +13,18 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-function Harness({ settings = DEFAULT_SETTINGS, open = vi.fn() }: { settings?: SyncedSettings; open?: (url: string) => void }) {
+function Harness({
+  settings = DEFAULT_SETTINGS,
+  open = vi.fn(),
+  bookmarks = [{ title: "Work", children: [{ title: "Guide", url: "https://guide.test" }] }]
+}: {
+  settings?: SyncedSettings;
+  open?: (url: string) => void;
+  bookmarks?: BookmarkItem[];
+}) {
   const [state, setState] = useState<AppState>({
     target: "extension",
-    bookmarks: [{ title: "Work", children: [{ title: "Guide", url: "https://guide.test" }] }],
+    bookmarks,
     notes: [],
     settings,
     sync: { phase: "local-only", message: "Local only" },
@@ -27,6 +35,34 @@ function Harness({ settings = DEFAULT_SETTINGS, open = vi.fn() }: { settings?: S
 }
 
 describe("AppShell interactions", () => {
+  it("shows domain names for unnamed bookmarks in the grid, folders and search results", async () => {
+    const url = "https://bbs.hupu.com/all-gambia";
+    const open = vi.fn();
+    mounted = await mountUi(
+      <Harness
+        open={open}
+        bookmarks={[
+          { title: "", url },
+          { title: "Work", children: [{ title: " \t ", url }] }
+        ]}
+      />
+    );
+    expect(document.querySelector(".cell-name")?.textContent).toBe("hupu");
+    const cells = document.querySelectorAll<HTMLButtonElement>(".bookmark-cell");
+    await click(cells[0]);
+    expect(open).toHaveBeenCalledWith(url);
+    await click(cells[1]);
+    expect(document.querySelector(".row-title")?.textContent).toBe("hupu");
+    await input(control<HTMLInputElement>("Search bookmarks"), "hupu");
+    const results = document.querySelectorAll<HTMLButtonElement>(".search-row");
+    expect([...results].map((result) => result.textContent)).toEqual(["hupu", "hupu"]);
+    expect(results[1].getAttribute("aria-label")).toBe("hupu — Work");
+    expect(results[1].title).toBe("Work / hupu");
+    open.mockClear();
+    await click(results[1]);
+    expect(open).toHaveBeenCalledWith(url);
+  });
+
   it("keeps results clickable with a hidden prompt and icon", async () => {
     const open = vi.fn();
     mounted = await mountUi(

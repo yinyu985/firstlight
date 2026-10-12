@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactP
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { BookmarkItem, Background } from "../shared/model";
 import { canOpenBookmark } from "../shared/url";
-import { countBookmarkUrls as countUrls } from "./bookmarks";
+import { countBookmarkUrls as countUrls, getBookmarkTitle } from "./bookmarks";
 import { localThemeVariables, useLocalPanelTheme } from "./panelTheme";
 import { VirtualItems } from "./VirtualItems";
 
@@ -74,7 +74,7 @@ function FolderList({ nodes, onOpen, showDetails }: FolderListProps) {
                     {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </span>
                 )}
-                <span className="row-title">{item.title || "UNTITLED"}</span>
+                <span className="row-title">{getBookmarkTitle(item)}</span>
                 {isFolder && showDetails && <span className="row-count">{countUrls(item.children ?? [])}</span>}
               </span>
             </button>

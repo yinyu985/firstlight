@@ -1,4 +1,21 @@
 import type { BookmarkItem } from "../shared/model";
+import { parse } from "tldts";
+import { toUnicode } from "punycode/";
+
+export function getBookmarkTitle(item: BookmarkItem): string {
+  if (item.title.trim()) return item.title;
+  if (!item.url) return "UNTITLED";
+  try {
+    const hostname = new URL(item.url).hostname.replace(/\.$/, "");
+    if (!hostname) return item.url;
+    const domain = parse(hostname, { allowPrivateDomains: true });
+    // Only shorten recognized suffixes; custom/internal hosts retain their identity.
+    const title = (domain.isIcann || domain.isPrivate) && domain.publicSuffix !== "home.arpa" ? domain.domainWithoutSuffix || hostname : hostname;
+    return toUnicode(title);
+  } catch {
+    return item.url;
+  }
+}
 
 export interface SearchResult {
   item: BookmarkItem & { url: string };
@@ -17,10 +34,11 @@ export function createBookmarkIndex(nodes: BookmarkItem[]): BookmarkIndexEntry[]
         entries.push({
           item: item as SearchResult["item"],
           path: path || "Bookmarks bar",
-          searchable: `${item.title}\n${item.url}\n${path}`.toLocaleLowerCase()
+          searchable: `${getBookmarkTitle(item)}\n${item.url}\n${path}`.toLocaleLowerCase()
         });
       } else {
-        walk(item.children ?? [], path ? `${path} / ${item.title}` : item.title);
+        const title = getBookmarkTitle(item);
+        walk(item.children ?? [], path ? `${path} / ${title}` : title);
       }
     }
   };

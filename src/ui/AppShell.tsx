@@ -43,7 +43,7 @@ import {
 } from "../shared/dynamicEffects";
 import type { AppState } from "../shared/protocol";
 import { canOpenBookmark } from "../shared/url";
-import { countBookmarkUrls as countUrls, createBookmarkIndex, searchBookmarkIndex } from "./bookmarks";
+import { countBookmarkUrls as countUrls, createBookmarkIndex, getBookmarkTitle, searchBookmarkIndex } from "./bookmarks";
 import { Picker } from "./Picker";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { useModalIsolation } from "./useModalIsolation";
@@ -925,18 +925,21 @@ export function AppShell(props: Props) {
           >
             {results.length ? (
               <>
-                {results.map((result, index) => (
-                  <button
-                    key={`${result.path}-${result.item.title}-${index}`}
-                    className="search-row"
-                    title={`${result.path} / ${result.item.title}`}
-                    aria-label={`${result.item.title || "Untitled"} — ${result.path}`}
-                    disabled={!canOpenBookmark(result.item.url)}
-                    onClick={() => open(result.item)}
-                  >
-                    <span>{result.item.title || result.item.url}</span>
-                  </button>
-                ))}
+                {results.map((result, index) => {
+                  const title = getBookmarkTitle(result.item);
+                  return (
+                    <button
+                      key={`${result.path}-${result.item.title}-${index}`}
+                      className="search-row"
+                      title={`${result.path} / ${title}`}
+                      aria-label={`${title} — ${result.path}`}
+                      disabled={!canOpenBookmark(result.item.url)}
+                      onClick={() => open(result.item)}
+                    >
+                      <span>{title}</span>
+                    </button>
+                  );
+                })}
               </>
             ) : (
               <div className="empty">NO RESULTS</div>
@@ -971,7 +974,7 @@ export function AppShell(props: Props) {
                     onClick={() => (folder ? setOpenFolder(active ? null : item) : open(item))}
                   >
                     <span className="cell-content">
-                      <span className="cell-name">{item.title || "UNTITLED"}</span>
+                      <span className="cell-name">{getBookmarkTitle(item)}</span>
                       {state.settings.features.bookmarkDetails && (
                         <span className={`cell-kind ${folder ? "cell-count" : "cell-link"}`}>{folder ? countUrls(item.children ?? []) : "↗"}</span>
                       )}

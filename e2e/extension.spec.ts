@@ -38,12 +38,18 @@ test("starts the extension app", async () => {
     await page.evaluate(async () => {
       const tree = await chrome.bookmarks.getTree();
       await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "Regression bookmark", url: "https://example.test/regression" });
+      await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "", url: "https://bbs.hupu.com/all-gambia" });
+      await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "", url: "https://例子.中国" });
       const folder = await chrome.bookmarks.create({ parentId: tree[0].children![0].id, title: "Attached folder" });
       await chrome.bookmarks.create({ parentId: folder.id, title: "Folder entry", url: "https://example.test/entry" });
+      await chrome.bookmarks.create({ parentId: folder.id, title: "", url: "https://alice.github.io/page" });
     });
     await expect(page.getByRole("button", { name: "Regression bookmark", exact: false })).toBeVisible();
+    await expect(page.locator(".cell-name").filter({ hasText: /^hupu$/ })).toBeVisible();
+    await expect(page.locator(".cell-name").filter({ hasText: /^例子$/ })).toBeVisible();
     const folder = page.getByRole("button", { name: "Attached folder", exact: false });
     await folder.click();
+    await expect(page.locator(".folder-row").filter({ hasText: /^alice$/ })).toBeVisible();
     await expectFolderAttached(page, "bottom");
     await folder.click();
     await page.getByRole("button", { name: "Open settings" }).click();
@@ -52,6 +58,8 @@ test("starts the extension app", async () => {
     await page.keyboard.press("Escape");
     await page.getByRole("textbox", { name: "Search bookmarks" }).fill("Regression");
     await expect(page.locator(".search-row")).toHaveText("Regression bookmark");
+    await page.getByRole("textbox", { name: "Search bookmarks" }).fill("例子");
+    await expect(page.locator(".search-row")).toHaveText("例子");
     await page.getByRole("button", { name: "Clear search" }).click();
 
     await page.getByRole("button", { name: "Open note panel" }).click();
