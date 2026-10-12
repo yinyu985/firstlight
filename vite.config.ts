@@ -130,6 +130,9 @@ export default defineConfig(({ mode }) => {
     if (id.includes("@codemirror/")) return "codemirror";
     if (id.includes("lucide-react")) return "lucide";
     if (/\/node_modules\/(?:react|react-dom|scheduler)\//.test(id)) return "react-vendor";
+    // Bookmark titles need the public-suffix list at startup, so it belongs to
+    // the eager graph as its own cacheable chunk instead of the lazy vendor bucket.
+    if (id.includes("tldts") || id.includes("punycode")) return "tldts";
     return "vendor";
   };
   return {
