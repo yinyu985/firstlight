@@ -952,10 +952,15 @@ describe("extension background integration", () => {
     await flushImmediateTimers();
 
     await vi.waitFor(() => expect(mock.getStored().pendingUpload?.attempts).toBe(1));
+    // vi.waitFor advances the fake clock while polling, so the retry deadline
+    // can drift a few polling intervals past the frozen baseline.
     const expectedRetryAt = new Date("2026-08-20T09:00:20.000Z").getTime();
-    expect(mock.getStored().pendingUpload).toEqual({ dueAt: expectedRetryAt, attempts: 1 });
+    const pending = mock.getStored().pendingUpload!;
+    expect(pending.attempts).toBe(1);
+    expect(pending.dueAt).toBeGreaterThanOrEqual(expectedRetryAt);
+    expect(pending.dueAt).toBeLessThanOrEqual(expectedRetryAt + 1_000);
     expect(mock.getStored().sync).toMatchObject({ phase: "error", message: "temporary network failure" });
-    expect(mock.alarmsCreate).toHaveBeenLastCalledWith("firstlight-pending-upload", { when: expectedRetryAt });
+    expect(mock.alarmsCreate).toHaveBeenLastCalledWith("firstlight-pending-upload", { when: pending.dueAt });
   });
 });
 
