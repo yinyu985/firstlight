@@ -8,6 +8,7 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: "http://127.0.0.1:4173",
+    channel: process.env.CI ? "chrome" : undefined,
     screenshot: "only-on-failure",
     trace: "retain-on-failure"
   },

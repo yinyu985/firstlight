@@ -1,7 +1,8 @@
-import { chromium, expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { launchExtensionContext } from "./browser";
 import { GIST_DESCRIPTION, type SyncNote } from "../src/shared/model";
 import { decodeGistSnapshot } from "../src/shared/notesEnvelope";
 import type { ExtensionRequest, ExtensionResponse } from "../src/shared/protocol";
@@ -31,11 +32,7 @@ test("large Notes survive extension A → independent extension B → Online, fa
     const profile = await mkdtemp(join(tmpdir(), "firstlight-crypto-"));
     profiles.push(profile);
     const path = resolve(import.meta.dirname, "../dist/extension");
-    const context = await chromium.launchPersistentContext(profile, {
-      channel: "chromium",
-      headless: true,
-      args: [`--disable-extensions-except=${path}`, `--load-extension=${path}`]
-    });
+    const context = await launchExtensionContext(profile, path);
     contexts.push(context);
     await context.route("https://api.github.com/**", async (route) => {
       const method = route.request().method(),

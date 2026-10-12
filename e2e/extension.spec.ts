@@ -1,7 +1,8 @@
-import { expect, test, chromium } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { launchExtensionContext } from "./browser";
 import { sampleSnapshot } from "./fixtures";
 import { expectFolderAttached, expectNotesMetadataVisible, expectNotesSortContained } from "./layoutAssertions";
 import { GIST_DESCRIPTION } from "../src/shared/model";
@@ -10,11 +11,7 @@ import { decodeGistSnapshot, encodeGistSnapshot } from "../src/shared/notesEnvel
 test("starts the extension app", async () => {
   const extensionPath = resolve(import.meta.dirname, "../dist/extension");
   const userDataDir = await mkdtemp(join(tmpdir(), "firstlight-e2e-"));
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    channel: "chromium",
-    headless: true,
-    args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]
-  });
+  const context = await launchExtensionContext(userDataDir, extensionPath);
 
   try {
     let [serviceWorker] = context.serviceWorkers();
@@ -162,11 +159,7 @@ test("starts the extension app", async () => {
 test("real extension diff restores remote data and uploads a reviewed local change", async () => {
   const extensionPath = resolve(import.meta.dirname, "../dist/extension");
   const userDataDir = await mkdtemp(join(tmpdir(), "firstlight-sync-e2e-"));
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    channel: "chromium",
-    headless: true,
-    args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]
-  });
+  const context = await launchExtensionContext(userDataDir, extensionPath);
   let snapshot = sampleSnapshot();
   let content = await encodeGistSnapshot(snapshot, "firstlight-e2e-token");
   let uploads = 0;

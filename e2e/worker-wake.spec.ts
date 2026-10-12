@@ -1,17 +1,14 @@
-import { chromium, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { launchExtensionContext } from "./browser";
 import { GIST_DESCRIPTION } from "../src/shared/model";
 
 test("a bookmark event wakes a stopped worker and schedules its upload", async () => {
   const extensionPath = resolve(import.meta.dirname, "../dist/extension");
   const profile = await mkdtemp(join(tmpdir(), "firstlight-worker-wake-"));
-  const context = await chromium.launchPersistentContext(profile, {
-    channel: "chromium",
-    headless: true,
-    args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]
-  });
+  const context = await launchExtensionContext(profile, extensionPath);
   let content: string | undefined;
   await context.route("https://api.github.com/**", async (route) => {
     const method = route.request().method();
